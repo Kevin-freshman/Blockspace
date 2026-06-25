@@ -1,0 +1,85 @@
+课后练习：实现一个 USDT 时间锁托管合约
+练习目标
+本练习要求同学阅读 USDT 的智能合约代码，理解 ERC20 Token 的基本工作逻辑，并使用 Solidity 与 Foundry 实现一个简单的 USDT 时间锁托管合约。
+完成后，你应该能够理解：
+ERC20 Token 的余额是如何记录的；
+transfer、approve、transferFrom 的区别；
+智能合约如何持有 ERC20 Token；
+如何使用 block.timestamp 实现时间限制；
+如何使用 Foundry 编写智能合约测试。
+任务一：阅读 USDT 合约代码
+请阅读 USDT Token 合约代码，重点理解以下内容：
+USDT 的余额是如何存储的？
+transfer(address to, uint value) 的作用是什么？
+approve(address spender, uint value) 的作用是什么？
+transferFrom(address from, address to, uint value) 的作用是什么？
+为什么用户在让另一个合约转走自己的 USDT 前，需要先调用 approve？
+USDT 的小数位数是多少？这和普通整数金额有什么关系？
+要求提交一段简短说明，解释 USDT 的基本工作逻辑。
+任务二：实现 USDT 时间锁托管合约
+请编写一个 Solidity 智能合约，实现以下功能：
+合约名称建议为：
+USDTTimeLock
+功能要求：
+用户可以将一定数量的 USDT 存入合约；
+存入时，合约记录：
+存款人地址；
+存款金额；
+存款时间；
+可取回时间；
+用户存入 USDT 后，必须等待至少 1 天才能取回；
+只有存款人本人可以取回自己的 USDT；
+未到 1 天时，用户不能取回；
+成功取回后，合约应清除该用户的存款记录，防止重复取款。
+参考接口：
+interface IERC20 {
+    function transfer(address to, uint256 amount) external returns (bool);
+
+    function transferFrom(address from, address to, uint256 amount) external
+        returns (bool);
+
+    function balanceOf(address account) external view returns (uint256);
+}
+
+核心函数建议：
+function deposit(uint256 amount) external;
+
+function withdraw() external;
+
+function getDeposit(address user) external view returns (...);
+
+注意：
+用户调用 deposit 前，需要先对你的合约调用 USDT 的 approve，否则 transferFrom 会失败。
+任务三：使用 Foundry 测试
+请使用 Foundry 为上述合约编写测试，至少覆盖以下场景：
+用户成功存入 USDT；
+存入后，合约中的 USDT 余额增加；
+未满 1 天时，用户取款失败；
+使用 vm.warp 模拟时间经过 1 天；
+满 1 天后，用户可以成功取回 USDT；
+取回后，用户的存款记录被清除；
+非本人不能取走其他用户的 USDT。
+建议测试流程：
+function testDepositUSDT() public;
+
+function testCannotWithdrawBeforeOneDay() public;
+
+function testWithdrawAfterOneDay() public;
+
+function testOtherUserCannotWithdraw() public;
+
+可以使用 MockUSDT 进行测试，不要求直接 fork 主网。
+提交要求
+请提交：
+对 USDT 合约工作逻辑的简短说明；
+USDTTimeLock.sol；
+MockUSDT.sol；
+Foundry 测试文件，例如 USDTTimeLock.t.sol；
+测试运行截图或文字结果。
+思考题
+如果用户重复调用 deposit，应该覆盖旧存款，还是允许多笔存款？
+如果 USDT 的 transfer 或 transferFrom 返回 false，合约应该如何处理？
+为什么 ERC20 Token 的余额不是存在用户账户里，而是存在 Token 合约里？
+这个合约是否可能存在重入攻击风险？为什么？
+如果把时间锁从 1 天改成 1 小时，应该如何修改代码？
+
