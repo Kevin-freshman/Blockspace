@@ -1,0 +1,3 @@
+[submodule "USDT_codingTask/Task1/lib/forge-std"]
+	path = USDT_codingTask/Task1/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
