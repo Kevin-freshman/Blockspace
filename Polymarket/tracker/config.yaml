@@ -1,0 +1,60 @@
+﻿# Polymarket 聪明钱追踪器配置
+# 所有模块的配置都从这里读取，不要在代码里硬编码。
+
+rpc:
+  # Polygon Mainnet RPC。
+  # 主数据源已改为官方 Data API（免费），RPC 只用于 verify 抽样校验和备用的
+  # sync-chain。Alchemy 免费档即可满足 verify（getTransactionReceipt 不限范围）。
+  # 注意：Alchemy 免费档 eth_getLogs 只允许 10 块范围，跑 sync-chain 需要付费档。
+  url: "https://polygon-mainnet.g.alchemy.com/v2/AR8urELxJFhKvBIJ6L-oM"
+  min_interval_ms: 150        # 两次 RPC 调用之间的最小间隔（毫秒）
+  max_retries: 5              # 瞬时错误的最大重试次数（指数退避）
+  confirmations: 30           # 只同步到 latest - confirmations，避免链重组
+
+seed:
+  categories: ["OVERALL", "CRYPTO"]     # 排行榜类别
+  time_periods: ["MONTH", "ALL"]        # 排行榜时间窗口
+  order_by: "PNL"
+  page_size: 50                         # API 单页上限 50
+  max_per_board: 500                    # 每个榜单最多翻到多少名（实测 offset 深度可能不足）
+
+ingest:
+  backfill_days: 90          # 历史回填天数（从今天往前推）
+  chunk_size: 20000           # eth_getLogs 初始分块大小（区块数），错误时自动减半
+  min_chunk_size: 50          # 分块下限，低于此仍失败则报错（公共节点响应上限很小）
+  address_batch_size: 40      # 每次 getLogs 的 topic 地址过滤批大小
+  track_taker_side: false     # 是否额外采集 taker 侧事件（PnL 只用 maker 侧，默认关）
+
+clob:
+  base_url: "https://clob.polymarket.com"   # 市场元数据来源（覆盖率优于 Gamma）
+  min_interval_ms: 120
+
+data_api:
+  base_url: "https://data-api.polymarket.com"
+  min_interval_ms: 150        # /activity 翻页的最小请求间隔
+  max_activity_pages_per_address: 400   # 单地址翻页上限（400页=20万条，防超高频地址拖死回填）
+  positions_page_size: 500
+  max_positions_pages: 10     # 每个地址最多翻多少页持仓
+
+tracker:
+  poll_interval_minutes: 30   # 追踪循环的轮询间隔
+  seed_refresh_hours: 24      # 多久刷新一次排行榜种子
+
+profile:
+  top_detail: 20              # 画像表里输出详细小节的地址数量
+
+storage:
+  db_path: "data/smartmoney.db"
+  output_dir: "output"
+
+# Polygon 主网合约地址（一般不需要改）
+# 注意：Polymarket 2026-04-28 迁移到 CLOB V2，新旧交易所都要采集
+contracts:
+  ctf_exchange: "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"          # V1（2026-04-28 前）
+  neg_risk_ctf_exchange: "0xC5d563A36AE78145C45a50134d48A1215220f80a"  # V1
+  ctf_exchange_v2: "0xE111180000d2663C0091e4f400237545B87B996B"        # V2（当前）
+  neg_risk_ctf_exchange_v2: "0xe2222d279d744050d28e00520010520000310F59"
+  conditional_tokens: "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+  usdc: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"    # USDC.e，V1 抵押品
+  pusd: "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"    # pUSD proxy，V2 抵押品
+
