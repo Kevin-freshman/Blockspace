@@ -40,7 +40,6 @@ crypto模块 - 可套利
 
 先交付MVP  
 
-
 # 推荐 Prompt 模板
 
 Prompt 不是一句"帮我写代码"，而是一份小型需求文档。好的 prompt 包含：背景、输入、输出、data schema、技术约束、错误处理要求和禁止事项。
