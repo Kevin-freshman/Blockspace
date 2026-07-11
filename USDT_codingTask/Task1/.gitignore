@@ -1,0 +1,8 @@
+# Foundry
+out/
+cache/
+broadcast/
+
+# Dependencies (用 forge install 重新拉取)
+# 如需提交依赖可删掉下面一行
+lib/
