@@ -1,0 +1,25 @@
+[Unit]
+Description=Crypto Top 5 static research site
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/kevin/Blockspace/Polymarket/crypto_top5_analysis/public
+ExecStart=/usr/bin/python3 -m http.server 8765 --bind 127.0.0.1 --directory /home/ubuntu/kevin/Blockspace/Polymarket/crypto_top5_analysis/public
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

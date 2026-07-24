@@ -1,0 +1,117 @@
+schema_version: 1
+config_version: phase0b-approved-v1
+locked_at_utc: "2026-07-24T07:56:56.859581Z"
+targets:
+  - seed_username: "0x8dxd"
+    seed_abbreviated_address: "0x63ce…ba9a"
+    proxy_wallet: "0x63ce342161250d705dc0b16df89036c8e5f9ba9a"
+    approval:
+      decision: APPROVE
+      scope: polymarket_user_profile_address
+      recorded_at_utc: "2026-07-24T07:56:56.859581Z"
+    automated_diagnostics:
+      original_status: unique_candidate_pending_approval
+      current_status: unique_candidate_pending_approval
+      api_username: "0x8dxd"
+      strict_username_match: true
+      flags: []
+    verification_records:
+      - source_request_id: "20260724T062818.197755Z_offset-0000_d0c54ed4538ac0fc"
+        source_url: "https://data-api.polymarket.com/v1/leaderboard?category=CRYPTO&timePeriod=ALL&orderBy=PNL&limit=50&offset=0"
+        requested_at_utc: "2026-07-24T06:28:18.197755Z"
+        offset: 0
+        raw_path: "data/raw/polymarket_leaderboard/2026/07/24/20260724T062818.197755Z_offset-0000_d0c54ed4538ac0fc.json.gz"
+        response_sha256: "d0c54ed4538ac0fcc9716f745420f7abbbad7403e8c764bd0c0300ab8c6252ff"
+    supplemental_evidence: []
+  - seed_username: "Anon"
+    seed_abbreviated_address: "0xf705…3ca7"
+    proxy_wallet: "0xf705fa045201391d9632b7f3cde06a5e24453ca7"
+    approval:
+      decision: APPROVE
+      scope: polymarket_user_profile_address
+      recorded_at_utc: "2026-07-24T07:56:56.859581Z"
+    automated_diagnostics:
+      original_status: zero_candidates_blocked
+      current_status: unique_candidate_pending_approval
+      api_username: ""
+      strict_username_match: false
+      flags:
+        - unique_abbreviated_address_match
+        - unique_address_candidate_username_semantics_unresolved
+    verification_records:
+      - source_request_id: "20260724T062818.197755Z_offset-0000_d0c54ed4538ac0fc"
+        source_url: "https://data-api.polymarket.com/v1/leaderboard?category=CRYPTO&timePeriod=ALL&orderBy=PNL&limit=50&offset=0"
+        requested_at_utc: "2026-07-24T06:28:18.197755Z"
+        offset: 0
+        raw_path: "data/raw/polymarket_leaderboard/2026/07/24/20260724T062818.197755Z_offset-0000_d0c54ed4538ac0fc.json.gz"
+        response_sha256: "d0c54ed4538ac0fcc9716f745420f7abbbad7403e8c764bd0c0300ab8c6252ff"
+    supplemental_evidence:
+      - evidence_type: official_profile_manual_review
+        source_url: "https://polymarket.com/profile/0xf705fa045201391d9632b7f3cde06a5e24453ca7"
+        observed_display_name: "Anon"
+        observed_profile_address: "0xf705fa045201391d9632b7f3cde06a5e24453ca7"
+        recorded_at_utc: "2026-07-24T06:48:00.792579Z"
+        observation_mode: manual
+  - seed_username: "justdance"
+    seed_abbreviated_address: "0xcc50…4c82"
+    proxy_wallet: "0xcc500cbcc8b7cf5bd21975ebbea34f21b5644c82"
+    approval:
+      decision: APPROVE
+      scope: polymarket_user_profile_address
+      recorded_at_utc: "2026-07-24T07:56:56.859581Z"
+    automated_diagnostics:
+      original_status: unique_candidate_pending_approval
+      current_status: unique_candidate_pending_approval
+      api_username: "justdance"
+      strict_username_match: true
+      flags: []
+    verification_records:
+      - source_request_id: "20260724T062818.197755Z_offset-0000_d0c54ed4538ac0fc"
+        source_url: "https://data-api.polymarket.com/v1/leaderboard?category=CRYPTO&timePeriod=ALL&orderBy=PNL&limit=50&offset=0"
+        requested_at_utc: "2026-07-24T06:28:18.197755Z"
+        offset: 0
+        raw_path: "data/raw/polymarket_leaderboard/2026/07/24/20260724T062818.197755Z_offset-0000_d0c54ed4538ac0fc.json.gz"
+        response_sha256: "d0c54ed4538ac0fcc9716f745420f7abbbad7403e8c764bd0c0300ab8c6252ff"
+    supplemental_evidence: []
+  - seed_username: "k9Q2mX4L8A7ZP3R"
+    seed_abbreviated_address: "0xd0d6…93aa"
+    proxy_wallet: "0xd0d6053c3c37e727402d84c14069780d360993aa"
+    approval:
+      decision: APPROVE
+      scope: polymarket_user_profile_address
+      recorded_at_utc: "2026-07-24T07:56:56.859581Z"
+    automated_diagnostics:
+      original_status: unique_candidate_pending_approval
+      current_status: unique_candidate_pending_approval
+      api_username: "k9Q2mX4L8A7ZP3R"
+      strict_username_match: true
+      flags: []
+    verification_records:
+      - source_request_id: "20260724T062818.197755Z_offset-0000_d0c54ed4538ac0fc"
+        source_url: "https://data-api.polymarket.com/v1/leaderboard?category=CRYPTO&timePeriod=ALL&orderBy=PNL&limit=50&offset=0"
+        requested_at_utc: "2026-07-24T06:28:18.197755Z"
+        offset: 0
+        raw_path: "data/raw/polymarket_leaderboard/2026/07/24/20260724T062818.197755Z_offset-0000_d0c54ed4538ac0fc.json.gz"
+        response_sha256: "d0c54ed4538ac0fcc9716f745420f7abbbad7403e8c764bd0c0300ab8c6252ff"
+    supplemental_evidence: []
+  - seed_username: "Bonereaper"
+    seed_abbreviated_address: "0xeebd…ba30"
+    proxy_wallet: "0xeebde7a0e019a63e6b476eb425505b7b3e6eba30"
+    approval:
+      decision: APPROVE
+      scope: polymarket_user_profile_address
+      recorded_at_utc: "2026-07-24T07:56:56.859581Z"
+    automated_diagnostics:
+      original_status: unique_candidate_pending_approval
+      current_status: unique_candidate_pending_approval
+      api_username: "Bonereaper"
+      strict_username_match: true
+      flags: []
+    verification_records:
+      - source_request_id: "20260724T062818.197755Z_offset-0000_d0c54ed4538ac0fc"
+        source_url: "https://data-api.polymarket.com/v1/leaderboard?category=CRYPTO&timePeriod=ALL&orderBy=PNL&limit=50&offset=0"
+        requested_at_utc: "2026-07-24T06:28:18.197755Z"
+        offset: 0
+        raw_path: "data/raw/polymarket_leaderboard/2026/07/24/20260724T062818.197755Z_offset-0000_d0c54ed4538ac0fc.json.gz"
+        response_sha256: "d0c54ed4538ac0fcc9716f745420f7abbbad7403e8c764bd0c0300ab8c6252ff"
+    supplemental_evidence: []

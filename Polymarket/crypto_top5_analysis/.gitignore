@@ -6,6 +6,8 @@ auth.json
 
 # Private runtime data
 data/
+!public/data/
+!public/data/**
 logs/
 *.db
 *.sqlite
@@ -31,4 +33,3 @@ dist/
 venv/
 env/
 ENV/
-

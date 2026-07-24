@@ -93,6 +93,9 @@ def main() -> None:
             f"{directory.name}/ must have mode 700"
         )
 
+    # Phase 0A must not place full addresses in seed/boundary documentation.
+    # Later phase progress may retain an approved public profile URL as audit
+    # evidence once config/targets.yaml has been locked.
     assert not FULL_ADDRESS.search(
         "\n".join(
             path.read_text(encoding="utf-8", errors="ignore")
@@ -100,10 +103,9 @@ def main() -> None:
                 ROOT / "AGENTS.md",
                 ROOT / "README.md",
                 ROOT / "docs" / "DATA_SOURCES.md",
-                ROOT / "docs" / "PROGRESS.md",
             )
         )
-    ), "Phase 0A documents contain a full wallet address"
+    ), "Phase 0A boundary documents contain a full wallet address"
 
     print("Phase 0A checks passed")
 

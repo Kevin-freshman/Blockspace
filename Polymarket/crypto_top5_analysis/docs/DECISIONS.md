@@ -158,3 +158,46 @@
 4. Polymarket 官方接口、分页上限、`start=1` 语义、Polygon 合约/ABI 和最终性规则。
 5. 公开页面地址截断与完整链上链接的展示政策。
 6. 五地址严格验证成功后自动锁定 `targets.yaml`，还是仍要求逐地址人工批准。
+
+## 12. Phase 0B 已批准目标配置 schema
+
+用户已于 2026-07-24 逐账户批准五个地址，批准范围仅为
+`polymarket_user_profile_address`。`config/targets.yaml` 固定使用以下
+schema，不得静默增删或改变字段语义：
+
+```yaml
+schema_version: 1
+config_version: phase0b-approved-v1
+locked_at_utc: <RFC3339 UTC>
+targets:
+  - seed_username: <string>
+    seed_abbreviated_address: <string>
+    proxy_wallet: <lowercase 0x + 40 hex>
+    approval:
+      decision: APPROVE
+      scope: polymarket_user_profile_address
+      recorded_at_utc: <RFC3339 UTC>
+    automated_diagnostics:
+      original_status: <string>
+      current_status: <string>
+      api_username: <string>
+      strict_username_match: <boolean>
+      flags: <string array>
+    verification_records:
+      - source_request_id: <string>
+        source_url: <string>
+        requested_at_utc: <RFC3339 UTC>
+        offset: <integer>
+        raw_path: <project-relative path>
+        response_sha256: <64 lowercase hex>
+    supplemental_evidence: <object array>
+```
+
+`verification_records` 必须逐项复制已批准候选的全部 source observations。
+Anon 的人工补充证据固定包含 `evidence_type`、`source_url`、
+`observed_display_name`、`observed_profile_address`、`recorded_at_utc` 和
+`observation_mode: manual`。该人工批准不得覆盖其原始自动诊断，也不建立
+“空 `userName` 必然显示为 Anon”的通用规则。
+
+这些地址只被确认为 Polymarket User Profile Address；不据此认定其为 EOA、
+资金来源、最终受益地址、现实身份或共同控制实体。
