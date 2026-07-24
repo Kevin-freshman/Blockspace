@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymarket Smart Money Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<!-- data.js sets window.DASHBOARD_DATA — works over file://; if absent we fall back to fetch('data.json') (http only) -->
+<script src="data.js"></script>
+<style>
+  :root {
+    --bg: #0b1220; --panel: #141d31; --panel2: #1b2740; --border: #263450;
+    --text: #e6edf7; --muted: #8b9bb8; --accent: #38bdf8;
+    --green: #34d399; --red: #f87171; --gray: #94a3b8; --purple: #a78bfa;
+    --gold: #fbbf24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "SF Pro Text", -apple-system, Segoe UI, Roboto, sans-serif;
+    font-size: 14px; line-height: 1.5; min-height: 100vh;
+  }
+  header {
+    padding: 18px 28px 0; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 20px; font-weight: 700; letter-spacing: .5px; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  nav.tabs {
+    display: flex; gap: 6px; padding: 14px 28px 0; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: var(--bg); z-index: 10;
+  }
+  nav.tabs button {
+    background: transparent; border: none; color: var(--muted); font-size: 14px;
+    padding: 10px 18px; cursor: pointer; border-bottom: 2px solid transparent;
+    font-family: inherit;
+  }
+  nav.tabs button:hover { color: var(--text); }
+  nav.tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  main { padding: 22px 28px 60px; max-width: 1400px; margin: 0 auto; }
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* KPI cards */
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 22px; }
+  .kpi {
+    background: linear-gradient(160deg, var(--panel2), var(--panel));
+    border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px;
+  }
+  .kpi .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .kpi .value { font-size: 26px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .kpi .hint { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 960px) { .grid2 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 18px; margin-bottom: 14px;
+  }
+  .card h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
+  .card .chart-wrap { position: relative; height: 300px; }
+  .card .chart-wrap.tall { height: 420px; }
+
+  /* Table */
+  .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .toolbar input {
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); padding: 8px 12px; width: 320px; font-size: 13px; font-family: inherit;
+  }
+  .toolbar input:focus { outline: none; border-color: var(--accent); }
+  .toolbar .count { color: var(--muted); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  thead th {
+    text-align: right; padding: 8px 10px; color: var(--muted); font-size: 12px; font-weight: 600;
+    border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap;
+    position: sticky; top: 47px; background: var(--panel); z-index: 5;
+  }
+  thead th:first-child, thead th:nth-child(2) { text-align: left; }
+  thead th:hover { color: var(--text); }
+  thead th .arr { color: var(--accent); font-size: 10px; }
+  tbody td { padding: 7px 10px; text-align: right; border-bottom: 1px solid rgba(38,52,80,.5); white-space: nowrap; }
+  tbody td:first-child, tbody td:nth-child(2) { text-align: left; }
+  tbody tr.datarow { cursor: pointer; }
+  tbody tr.datarow:hover { background: rgba(56,189,248,.06); }
+  tbody tr.expanded { background: rgba(56,189,248,.08); }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+  .addr { color: var(--muted); font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
+  .uname { font-weight: 600; }
+  .style-badge { font-size: 11px; padding: 1px 8px; border-radius: 10px; margin-left: 6px; }
+  .style-late  { background: rgba(248,113,113,.15); color: var(--red); }
+  .style-early { background: rgba(52,211,153,.15); color: var(--green); }
+  .style-mixed { background: rgba(148,163,184,.15); color: var(--gray); }
+  .style-other { background: rgba(167,139,250,.15); color: var(--purple); }
+  .wl-bar { display: inline-flex; width: 90px; height: 8px; border-radius: 4px; overflow: hidden; background: #0e1526; vertical-align: middle; }
+  .wl-bar .w { background: var(--green); } .wl-bar .l { background: var(--red); }
+  .wl-txt { color: var(--muted); font-size: 11px; margin-left: 6px; }
+
+  /* detail expansion */
+  tr.detail td { background: #0e1729; padding: 14px 18px; text-align: left; }
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 900px) { .detail-grid { grid-template-columns: 1fr; } }
+  .detail-grid h4 { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .mkt-row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-bottom: 1px dashed rgba(38,52,80,.6); font-size: 12.5px; }
+  .mkt-row .q { flex: 1; white-space: normal; }
+  .mkt-row .cat { color: var(--muted); font-size: 11px; flex-shrink: 0; }
+  .mkt-row .pnl { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .empty-note { color: var(--muted); font-size: 12px; }
+
+  .pager { display: flex; gap: 8px; align-items: center; margin-top: 12px; justify-content: center; }
+  .pager button {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 5px 12px; cursor: pointer; font-family: inherit;
+  }
+  .pager button:disabled { opacity: .35; cursor: default; }
+  .pager span { color: var(--muted); font-size: 12px; }
+
+  #loading { padding: 60px; text-align: center; color: var(--muted); }
+  #loaderr { padding: 40px; text-align: center; color: var(--red); display: none; }
+  footer { text-align: center; color: var(--muted); font-size: 11px; padding: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📈 Polymarket Smart Money Tracker</h1>
+  <span class="sub" id="genAt"></span>
+</header>
+<nav class="tabs" id="tabs">
+  <button data-page="overview" class="active">Overview</button>
+  <button data-page="table">Leaderboard</button>
+  <button data-page="scatter">Scatter Analysis</button>
+  <button data-page="category">Categories</button>
+</nav>
+
+<div id="loading">Loading data…</div>
+<div id="loaderr">Failed to load data: run <code>python3 export_for_viz.py</code> first to generate data.js / data.json.</div>
+
+<main id="main" style="display:none">
+  <!-- Page 1: overview -->
+  <section class="page active" id="page-overview">
+    <div class="kpi-row" id="kpiRow"></div>
+    <div class="grid2">
+      <div class="card"><h3>PnL Distribution</h3><div class="chart-wrap"><canvas id="chPnl"></canvas></div></div>
+      <div class="card"><h3>Entry Style Breakdown</h3><div class="chart-wrap"><canvas id="chStyle"></canvas></div></div>
+    </div>
+    <div class="card"><h3>Win Rate Distribution (addresses with ≥ 1 resolved market)</h3><div class="chart-wrap"><canvas id="chWinDist"></canvas></div></div>
+  </section>
+
+  <!-- Page 2: table -->
+  <section class="page" id="page-table">
+    <div class="card">
+      <div class="toolbar">
+        <input id="searchBox" type="text" placeholder="Search username / address …">
+        <span class="count" id="rowCount"></span>
+        <span class="count" style="margin-left:auto">Click a row to expand its top winning / losing markets</span>
+      </div>
+      <table id="addrTable">
+        <thead><tr id="theadRow"></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="pager">
+        <button id="pgPrev">← Prev</button>
+        <span id="pgInfo"></span>
+        <button id="pgNext">Next →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Page 3: scatter -->
+  <section class="page" id="page-scatter">
+    <div class="card">
+      <h3>Entry Lead Time vs Win Rate (bubble size = |total_pnl|, symmetric log X axis)</h3>
+      <div class="chart-wrap tall"><canvas id="chScatter"></canvas></div>
+      <p class="empty-note" style="margin-top:8px">
+        Positive X = median entry N hours before market end (larger = earlier positioning); negative = median entry after the scheduled end time (last-minute / resolution sniping).
+        Colors: <span class="style-badge style-late">Late (late_buy_share ≥ 0.7)</span>
+        <span class="style-badge style-early">Early (≤ 0.3)</span>
+        <span class="style-badge style-mixed">Mixed</span>
+        <span class="style-badge style-other">Other / insufficient data</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- Page 4: category -->
+  <section class="page" id="page-category">
+    <div class="card"><h3>Markets per Category (1.75M markets, top 15 categories)</h3><div class="chart-wrap"><canvas id="chCatCount"></canvas></div></div>
+    <div class="card"><h3>Smart-Money Avg Win Rate by Category (resolved positions, categories with ≥ 100 positions)</h3><div class="chart-wrap"><canvas id="chCatWin"></canvas></div></div>
+    <div class="card">
+      <h3>Top 20 Markets by Smart-Money Volume</h3>
+      <table><thead><tr>
+        <th style="text-align:left">Market</th><th style="text-align:left">Category</th>
+        <th>Addresses</th><th>Buy Volume</th><th>Realized PnL</th>
+      </tr></thead><tbody id="topMktBody"></tbody></table>
+    </div>
+  </section>
+</main>
+<footer>Polymarket Smart Money Tracker · static page, opens directly via file:// · data generated by export_for_viz.py</footer>
+
+<script>
+"use strict";
+/* ---------- palette & helpers ---------- */
+const C = {
+  late: "#f87171", early: "#34d399", mixed: "#94a3b8", other: "#a78bfa",
+  accent: "#38bdf8", gold: "#fbbf24", muted: "#8b9bb8", grid: "rgba(139,155,184,.12)"
+};
+const STYLE_CN = { late: "Late", early: "Early", mixed: "Mixed", other: "Other" };
+
+function fmtUsd(v, digits) {
+  if (v === null || v === undefined || isNaN(v)) return "—";
+  const abs = Math.abs(v), sign = v < 0 ? "-" : "";
+  const d = digits === undefined ? 1 : digits;
+  if (abs >= 1e9) return sign + "$" + (abs / 1e9).toFixed(d) + "B";
+  if (abs >= 1e6) return sign + "$" + (abs / 1e6).toFixed(d) + "M";
+  if (abs >= 1e3) return sign + "$" + (abs / 1e3).toFixed(d) + "K";
+  return sign + "$" + abs.toFixed(0);
+}
+function fmtPct(v) { return (v === null || v === undefined) ? "—" : (v * 100).toFixed(1) + "%"; }
+function fmtNum(v) { return (v === null || v === undefined) ? "—" : v.toLocaleString(); }
+function fmtLead(h) {
+  if (h === null || h === undefined) return "—";
+  const abs = Math.abs(h);
+  const s = abs >= 48 ? (abs / 24).toFixed(1) + "d" : abs.toFixed(1) + "h";
+  return (h >= 0 ? "+" : "−") + s;
+}
+function shortAddr(a) { return a.slice(0, 6) + "…" + a.slice(-4); }
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+// symmetric log used for scatter X
+function symlog(v) { return Math.sign(v) * Math.log10(1 + Math.abs(v)); }
+function symexp(v) { return Math.sign(v) * (Math.pow(10, Math.abs(v)) - 1); }
+
+Chart.defaults.color = C.muted;
+Chart.defaults.borderColor = C.grid;
+Chart.defaults.font.family = '"SF Pro Text",sans-serif';
+
+/* ---------- data loading: data.js (file://-safe) then fetch fallback ---------- */
+async function loadData() {
+  if (window.DASHBOARD_DATA) return window.DASHBOARD_DATA;
+  const resp = await fetch("data.json");           // works only over http(s)
+  if (!resp.ok) throw new Error("HTTP " + resp.status);
+  return resp.json();
+}
+
+/* ---------- tabs ---------- */
+document.getElementById("tabs").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-page]");
+  if (!btn) return;
+  document.querySelectorAll("nav.tabs button").forEach(b => b.classList.toggle("active", b === btn));
+  document.querySelectorAll(".page").forEach(p => p.classList.toggle("active", p.id === "page-" + btn.dataset.page));
+});
+
+/* =======================================================================
+   Page 1 — overview
+======================================================================= */
+function renderOverview(D) {
+  const k = D.kpi;
+  const cards = [
+    ["Total Addresses", fmtNum(k.n_addresses), "tracked smart-money wallets"],
+    ["Profitable Addresses", fmtNum(k.n_profitable), (k.n_profitable / k.n_addresses * 100).toFixed(1) + "% with positive PnL"],
+    ["Top PnL", fmtUsd(k.max_pnl, 2), "by " + esc(k.max_pnl_user)],
+    ["Total Volume", fmtUsd(k.total_volume, 2), "buy + sell volume"],
+  ];
+  document.getElementById("kpiRow").innerHTML = cards.map(([l, v, h]) =>
+    `<div class="kpi"><div class="label">${l}</div><div class="value">${v}</div><div class="hint">${h}</div></div>`).join("");
+
+  // PnL buckets
+  const buckets = [
+    ["Loss", a => a.total_pnl < 0, C.late],
+    ["$0–$1K", a => a.total_pnl >= 0 && a.total_pnl < 1e3, "#64748b"],
+    ["$1K–$10K", a => a.total_pnl >= 1e3 && a.total_pnl < 1e4, "#22d3ee"],
+    ["$10K–$100K", a => a.total_pnl >= 1e4 && a.total_pnl < 1e5, C.accent],
+    ["$100K–$1M", a => a.total_pnl >= 1e5 && a.total_pnl < 1e6, C.early],
+    ["$1M+", a => a.total_pnl >= 1e6, C.gold],
+  ];
+  new Chart(document.getElementById("chPnl"), {
+    type: "bar",
+    data: {
+      labels: buckets.map(b => b[0]),
+      datasets: [{ data: buckets.map(b => D.addresses.filter(b[1]).length),
+                   backgroundColor: buckets.map(b => b[2]), borderRadius: 6 }]
+    },
+    options: {
+      maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { y: { title: { display: true, text: "Addresses" }, grid: { color: C.grid } }, x: { grid: { display: false } } }
+    }
+  });
+
+  // style doughnut
+  const styleOrder = ["late", "early", "mixed", "other"];
+  const styleCounts = styleOrder.map(s => D.addresses.filter(a => a.style === s).length);
+  new Chart(document.getElementById("chStyle"), {
+    type: "doughnut",
+    data: {
+      labels: styleOrder.map((s, i) => `${STYLE_CN[s]} ${(styleCounts[i] / D.addresses.length * 100).toFixed(1)}%`),
+      datasets: [{ data: styleCounts, backgroundColor: styleOrder.map(s => C[s]), borderColor: "#0b1220", borderWidth: 3 }]
+    },
+    options: {
+      maintainAspectRatio: false, cutout: "62%",
+      plugins: {
+        legend: { position: "right" },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.parsed} addresses` } }
+      }
+    }
+  });
+
+  // win-rate histogram (addresses with at least 1 resolved market)
+  const withWr = D.addresses.filter(a => a.win_rate !== null && a.n_resolved > 0);
+  const wrBins = new Array(10).fill(0);
+  withWr.forEach(a => wrBins[Math.min(9, Math.floor(a.win_rate * 10))]++);
+  new Chart(document.getElementById("chWinDist"), {
+    type: "bar",
+    data: {
+      labels: wrBins.map((_, i) => `${i * 10}–${i * 10 + 10}%`),
+      datasets: [{ data: wrBins, borderRadius: 6,
+        backgroundColor: wrBins.map((_, i) => i >= 5 ? C.early : C.late) }]
+    },
+    options: {
+      maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { y: { title: { display: true, text: "Addresses" }, grid: { color: C.grid } }, x: { grid: { display: false } } }
+    }
+  });
+}
+
+/* =======================================================================
+   Page 2 — sortable/searchable table
+======================================================================= */
+const COLS = [
+  { key: "username", label: "Username", num: false },
+  { key: "address", label: "Address", num: false },
+  { key: "total_pnl", label: "PnL", num: true },
+  { key: "win_rate", label: "Win Rate", num: true },
+  { key: "median_entry_lead_h", label: "Entry Lead", num: true },
+  { key: "late_buy_share", label: "Late Share", num: true },
+  { key: "n_resolved", label: "Resolved", num: true },
+  { key: "winloss", label: "W / L", num: true, sortKey: "wins" },
+];
+const PAGE_SIZE = 50;
+const tState = { sortKey: "total_pnl", sortDir: -1, query: "", page: 0, rows: [], expanded: null };
+
+function buildTableHead() {
+  document.getElementById("theadRow").innerHTML = COLS.map(c =>
+    `<th data-key="${c.sortKey || c.key}">${c.label} <span class="arr" data-arr="${c.sortKey || c.key}"></span></th>`).join("");
+  document.getElementById("theadRow").addEventListener("click", e => {
+    const th = e.target.closest("th"); if (!th) return;
+    const key = th.dataset.key;
+    if (tState.sortKey === key) tState.sortDir *= -1;
+    else { tState.sortKey = key; tState.sortDir = -1; }
+    tState.page = 0; renderTable();
+  });
+}
+
+function applyFilterSort(D) {
+  const q = tState.query.toLowerCase();
+  let rows = D.addresses;
+  if (q) rows = rows.filter(a =>
+    (a.username || "").toLowerCase().includes(q) || a.address.toLowerCase().includes(q));
+  const k = tState.sortKey, dir = tState.sortDir;
+  // dir: 1 = ascending, -1 = descending; null/undefined always sink to the bottom
+  rows = rows.slice().sort((a, b) => {
+    let va = a[k], vb = b[k];
+    if (va === null || va === undefined) return 1;
+    if (vb === null || vb === undefined) return -1;
+    if (typeof va === "string") {
+      va = va.toLowerCase(); vb = String(vb).toLowerCase();
+      return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
+    }
+    return (va - vb) * dir;
+  });
+  tState.rows = rows;
+}
+
+function mktList(list, emptyMsg) {
+  if (!list || !list.length) return `<p class="empty-note">${emptyMsg}</p>`;
+  return list.map(m => `
+    <div class="mkt-row">
+      <span class="q">${esc(m.q)}</span>
+      <span class="cat">${esc(m.cat)}</span>
+      <span class="pnl ${m.pnl >= 0 ? "pos" : "neg"}">${fmtUsd(m.pnl, 2)}</span>
+    </div>`).join("");
+}
+
+function renderTable() {
+  applyFilterSort(window.__D);
+  const { rows, page } = tState;
+  const nPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const slice = rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  document.querySelectorAll("#theadRow .arr").forEach(s => {
+    s.textContent = s.dataset.arr === tState.sortKey ? (tState.sortDir === -1 ? "▼" : "▲") : "";
+  });
+
+  const tb = document.getElementById("tbody");
+  tb.innerHTML = slice.map((a, i) => {
+    const losses = (a.n_resolved || 0) - (a.wins || 0);
+    const tot = Math.max(1, (a.wins || 0) + losses);
+    return `
+    <tr class="datarow" data-addr="${a.address}">
+      <td><span class="uname">${esc(a.username) || "<span class='addr'>(unknown)</span>"}</span><span class="style-badge style-${a.style}">${STYLE_CN[a.style]}</span></td>
+      <td class="addr" title="${a.address}">${shortAddr(a.address)}</td>
+      <td class="${(a.total_pnl ?? 0) >= 0 ? "pos" : "neg"}">${fmtUsd(a.total_pnl, 2)}</td>
+      <td>${fmtPct(a.win_rate)}</td>
+      <td>${fmtLead(a.median_entry_lead_h)}</td>
+      <td>${fmtPct(a.late_buy_share)}</td>
+      <td>${fmtNum(a.n_resolved)}</td>
+      <td>
+        <span class="wl-bar">
+          <span class="w" style="width:${(a.wins || 0) / tot * 100}%"></span>
+          <span class="l" style="width:${losses / tot * 100}%"></span>
+        </span>
+        <span class="wl-txt">${a.wins || 0}W ${losses}L</span>
+      </td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("rowCount").textContent = `${rows.length} addresses`;
+  document.getElementById("pgInfo").textContent = `Page ${page + 1} / ${nPages}`;
+  document.getElementById("pgPrev").disabled = page === 0;
+  document.getElementById("pgNext").disabled = page >= nPages - 1;
+}
+
+function initTable(D) {
+  window.__D = D;
+  buildTableHead();
+  renderTable();
+
+  document.getElementById("searchBox").addEventListener("input", e => {
+    tState.query = e.target.value.trim(); tState.page = 0; renderTable();
+  });
+  document.getElementById("pgPrev").addEventListener("click", () => { tState.page--; renderTable(); });
+  document.getElementById("pgNext").addEventListener("click", () => { tState.page++; renderTable(); });
+
+  document.getElementById("tbody").addEventListener("click", e => {
+    const tr = e.target.closest("tr.datarow"); if (!tr) return;
+    const addr = tr.dataset.addr;
+    const existing = document.querySelector("tr.detail");
+    const wasOpen = tr.classList.contains("expanded");
+    document.querySelectorAll("tr.expanded").forEach(r => r.classList.remove("expanded"));
+    if (existing) existing.remove();
+    if (wasOpen) return;
+    const a = D.addresses.find(x => x.address === addr);
+    tr.classList.add("expanded");
+    const dtr = document.createElement("tr");
+    dtr.className = "detail";
+    dtr.innerHTML = `<td colspan="${COLS.length}">
+      <div style="margin-bottom:10px" class="addr">${a.address} · ${fmtNum(a.n_markets)} markets · ${fmtNum(a.n_fills)} fills · buy volume ${fmtUsd(a.buy_volume, 2)} · official PnL ${fmtUsd(a.official_pnl, 2)} (diff ${fmtUsd(a.pnl_diff, 2)})</div>
+      <div class="detail-grid">
+        <div><h4 style="color:var(--green)">💰 Top ${a.top_markets.length || 5} Winning Markets</h4>${mktList(a.top_markets, "No resolved winning markets")}</div>
+        <div><h4 style="color:var(--red)">💸 Top ${a.worst_markets.length || 5} Losing Markets</h4>${mktList(a.worst_markets, "No resolved losing markets")}</div>
+      </div></td>`;
+    tr.after(dtr);
+  });
+}
+
+/* =======================================================================
+   Page 3 — scatter
+======================================================================= */
+function renderScatter(D) {
+  const styles = ["late", "early", "mixed", "other"];
+  const pts = D.addresses.filter(a => a.median_entry_lead_h !== null && a.win_rate !== null);
+  const maxPnl = Math.max(...pts.map(a => Math.abs(a.total_pnl || 0)), 1);
+  const datasets = styles.map(s => ({
+    label: STYLE_CN[s],
+    data: pts.filter(a => a.style === s).map(a => ({
+      x: symlog(a.median_entry_lead_h),
+      y: a.win_rate,
+      r: 3 + 17 * Math.sqrt(Math.abs(a.total_pnl || 0) / maxPnl),
+      a,
+    })),
+    backgroundColor: C[s] + "99", borderColor: C[s], borderWidth: 1,
+  }));
+
+  const tickVals = [-1000, -100, -10, 0, 10, 100, 1000, 10000].map(symlog);
+  new Chart(document.getElementById("chScatter"), {
+    type: "bubble",
+    data: { datasets },
+    options: {
+      maintainAspectRatio: false,
+      scales: {
+        x: {
+          min: symlog(-4000), max: symlog(30000),
+          title: { display: true, text: "Median entry lead (hours, symmetric log scale; negative = entered after market end)" },
+          grid: { color: C.grid },
+          afterBuildTicks: ax => { ax.ticks = tickVals.map(v => ({ value: v })); },
+          ticks: { callback: v => { const h = symexp(v); return Math.abs(h) >= 999 ? Math.round(h / 24 / 10) * 10 + "d" : Math.round(h) + "h"; } }
+        },
+        y: {
+          min: -0.02, max: 1.02, title: { display: true, text: "Win rate" },
+          grid: { color: C.grid }, ticks: { callback: v => (v * 100).toFixed(0) + "%" }
+        }
+      },
+      plugins: {
+        legend: { position: "top", labels: { usePointStyle: true } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const a = ctx.raw.a;
+              return [
+                ` ${a.username || shortAddr(a.address)} (${STYLE_CN[a.style]})`,
+                ` PnL: ${fmtUsd(a.total_pnl, 2)} · Win rate: ${fmtPct(a.win_rate)}`,
+                ` Entry lead: ${fmtLead(a.median_entry_lead_h)} · Late share: ${fmtPct(a.late_buy_share)}`,
+                ` Resolved: ${a.n_resolved} · Markets: ${a.n_markets}`,
+              ];
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+/* =======================================================================
+   Page 4 — categories
+======================================================================= */
+function renderCategory(D) {
+  const byCount = D.categories.filter(c => c.category !== "Uncategorized")
+    .slice().sort((a, b) => b.n_markets - a.n_markets).slice(0, 15);
+  new Chart(document.getElementById("chCatCount"), {
+    type: "bar",
+    data: {
+      labels: byCount.map(c => c.category),
+      datasets: [{ data: byCount.map(c => c.n_markets), backgroundColor: C.accent + "cc", borderRadius: 6 }]
+    },
+    options: {
+      indexAxis: "y", maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${fmtNum(ctx.parsed.x)} markets` } } },
+      scales: { x: { title: { display: true, text: "Number of markets" }, grid: { color: C.grid } }, y: { grid: { display: false } } }
+    }
+  });
+
+  const byWin = D.categories.filter(c => c.n_positions >= 100 && c.category !== "Uncategorized")
+    .slice().sort((a, b) => b.avg_win_rate - a.avg_win_rate).slice(0, 15);
+  new Chart(document.getElementById("chCatWin"), {
+    type: "bar",
+    data: {
+      labels: byWin.map(c => c.category),
+      datasets: [{ data: byWin.map(c => c.avg_win_rate),
+        backgroundColor: byWin.map(c => c.avg_win_rate >= 0.5 ? C.early + "cc" : C.late + "cc"), borderRadius: 6 }]
+    },
+    options: {
+      indexAxis: "y", maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: {
+        label: ctx => { const c = byWin[ctx.dataIndex]; return ` Win rate ${fmtPct(c.avg_win_rate)} · ${fmtNum(c.n_positions)} resolved positions · PnL ${fmtUsd(c.total_pnl, 2)}`; } } } },
+      scales: { x: { min: 0, max: 1, ticks: { callback: v => (v * 100) + "%" }, grid: { color: C.grid } }, y: { grid: { display: false } } }
+    }
+  });
+
+  document.getElementById("topMktBody").innerHTML = (D.top_markets || []).slice(0, 20).map(m => `
+    <tr>
+      <td style="white-space:normal">${esc(m.q)}</td>
+      <td style="text-align:left" class="addr">${esc(m.cat)}</td>
+      <td>${fmtNum(m.n_addr)}</td>
+      <td>${fmtUsd(m.volume, 2)}</td>
+      <td class="${(m.pnl ?? 0) >= 0 ? "pos" : "neg"}">${fmtUsd(m.pnl, 2)}</td>
+    </tr>`).join("");
+}
+
+/* ---------- boot ---------- */
+loadData().then(D => {
+  document.getElementById("loading").style.display = "none";
+  document.getElementById("main").style.display = "";
+  document.getElementById("genAt").textContent =
+    `Data generated ${D.generated_at} · ${D.kpi.n_addresses} addresses · ${D.categories.length} categories`;
+  renderOverview(D);
+  initTable(D);
+  renderScatter(D);
+  renderCategory(D);
+}).catch(err => {
+  console.error(err);
+  document.getElementById("loading").style.display = "none";
+  document.getElementById("loaderr").style.display = "";
+});
+</script>
+</body>
+</html>
