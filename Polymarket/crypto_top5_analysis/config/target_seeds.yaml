@@ -1,0 +1,41 @@
+schema_version: 1
+source: user_provided_seed_snapshot
+snapshot_time: unknown
+snapshot_as_of_utc: null
+targets:
+  - seed_rank: 1
+    username: "0x8dxd"
+    abbreviated_address: "0x63ce…ba9a"
+    official_pnl_usd: 2382769
+    official_volume_usd: 199130901
+    pnl_to_volume: "1.20%"
+    address_status: unresolved
+  - seed_rank: 2
+    username: "Anon"
+    abbreviated_address: "0xf705…3ca7"
+    official_pnl_usd: 1906183
+    official_volume_usd: 82531993
+    pnl_to_volume: "2.31%"
+    address_status: unresolved
+  - seed_rank: 3
+    username: "justdance"
+    abbreviated_address: "0xcc50…4c82"
+    official_pnl_usd: 1886998
+    official_volume_usd: 112549196
+    pnl_to_volume: "1.68%"
+    address_status: unresolved
+  - seed_rank: 4
+    username: "k9Q2mX4L8A7ZP3R"
+    abbreviated_address: "0xd0d6…93aa"
+    official_pnl_usd: 1720272
+    official_volume_usd: 208393329
+    pnl_to_volume: "0.83%"
+    address_status: unresolved
+  - seed_rank: 5
+    username: "Bonereaper"
+    abbreviated_address: "0xeebd…ba30"
+    official_pnl_usd: 1208667
+    official_volume_usd: 204195521
+    pnl_to_volume: "0.59%"
+    address_status: unresolved
+
