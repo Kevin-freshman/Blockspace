@@ -2,7 +2,7 @@
   "leaderboard": {
     "time_period": "WEEK",
     "order_by": "PNL",
-    "candidate_limit": 20
+    "candidate_limit": 200
   },
   "filter": {
     "lookback_hours": 168,
@@ -13,9 +13,27 @@
   },
   "sampling": {
     "activity_page_size": 500,
-    "max_activity_pages": 3,
-    "settlement_markets_per_address": 16,
-    "max_workers": 8
+    "max_activity_pages": 2,
+    "settlement_markets_per_address": 12,
+    "max_workers": 12
+  },
+  "chain": {
+    "enabled": true,
+    "rpc_url": "https://polygon.drpc.org",
+    "chain_id": 137,
+    "receipts_per_address": 8,
+    "batch_size": 20,
+    "min_confirmed_transactions": 1,
+    "min_verification_rate": 0.8,
+    "min_polymarket_contract_rate": 0,
+    "live_receipts_per_poll": 20,
+    "polymarket_contracts": [
+      "0xE111180000d2663C0091e4f400237545B87B996B",
+      "0xe2222d279d744050d28e00520010520000310F59",
+      "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296",
+      "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+      "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+    ]
   },
   "live": {
     "poll_seconds": 15,

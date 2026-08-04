@@ -28,19 +28,30 @@ class PolymarketClient:
         order_by: str,
         limit: int,
     ) -> List[Dict[str, Any]]:
-        data = self._get(
-            self.DATA_API + "/v1/leaderboard",
-            {
-                "category": "CRYPTO",
-                "timePeriod": time_period,
-                "orderBy": order_by,
-                "limit": limit,
-                "offset": 0,
-            },
-        )
-        if not isinstance(data, list):
-            raise PolymarketApiError("leaderboard response was not a list")
-        return data
+        rows: List[Dict[str, Any]] = []
+        while len(rows) < limit:
+            page_size = min(50, limit - len(rows))
+            data = self._get(
+                self.DATA_API + "/v1/leaderboard",
+                {
+                    "category": "CRYPTO",
+                    "timePeriod": time_period,
+                    "orderBy": order_by,
+                    "limit": page_size,
+                    "offset": len(rows),
+                },
+            )
+            if not isinstance(data, list):
+                raise PolymarketApiError("leaderboard response was not a list")
+            rows.extend(data)
+            if len(data) < page_size:
+                break
+        deduplicated: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            address = str(row.get("proxyWallet") or "").lower()
+            if address and address not in deduplicated:
+                deduplicated[address] = row
+        return list(deduplicated.values())[:limit]
 
     def recent_activity(
         self,

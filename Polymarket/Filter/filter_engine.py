@@ -155,35 +155,173 @@ def build_address_metrics(
         "open_position_count": None,
         "open_position_value": None,
         "open_position_cash_pnl": None,
+        "chain_status": "not_checked",
+        "chain_sample_size": 0,
+        "chain_receipt_count": 0,
+        "chain_confirmed_count": 0,
+        "chain_verification_rate": 0.0,
+        "polymarket_contract_hit_count": 0,
+        "polymarket_contract_rate": 0.0,
+        "chain_latest_block": None,
+        "chain_log_count": 0,
         "passes": False,
         "filter_reasons": [],
     }
     return metrics, normalized
 
 
-def apply_filter(metrics: Dict[str, Any], filters: Dict[str, Any]) -> Dict[str, Any]:
+def apply_filter(
+    metrics: Dict[str, Any],
+    filters: Dict[str, Any],
+    check_settlement: bool = True,
+) -> Dict[str, Any]:
     reasons = []
     if metrics["trade_count"] < filters["min_trade_count"]:
         reasons.append("trade_count")
     if metrics["trades_per_day"] < filters["min_trades_per_day"]:
         reasons.append("trades_per_day")
 
-    distance = metrics.get("median_hours_to_settlement")
-    minimum = filters.get("min_median_hours_to_settlement")
-    maximum = filters.get("max_median_hours_to_settlement")
-    if minimum is not None or maximum is not None:
-        if distance is None:
-            reasons.append("settlement_distance_unknown")
-        else:
-            if minimum is not None and distance < minimum:
-                reasons.append("settlement_distance_min")
-            if maximum is not None and distance > maximum:
-                reasons.append("settlement_distance_max")
+    if check_settlement:
+        distance = metrics.get("median_hours_to_settlement")
+        minimum = filters.get("min_median_hours_to_settlement")
+        maximum = filters.get("max_median_hours_to_settlement")
+        if minimum is not None or maximum is not None:
+            if distance is None:
+                reasons.append("settlement_distance_unknown")
+            else:
+                if minimum is not None and distance < minimum:
+                    reasons.append("settlement_distance_min")
+                if maximum is not None and distance > maximum:
+                    reasons.append("settlement_distance_max")
 
     result = dict(metrics)
     result["filter_reasons"] = reasons
     result["passes"] = not reasons
     return result
+
+
+def summarize_chain_receipts(
+    transaction_hashes: Iterable[str],
+    receipt_cache: Dict[str, Dict[str, Any]],
+    polymarket_contracts: Iterable[str],
+) -> Dict[str, Any]:
+    hashes = list(
+        dict.fromkeys(
+            str(value).lower()
+            for value in transaction_hashes
+            if str(value).startswith("0x") and len(str(value)) == 66
+        )
+    )
+    contracts = {str(value).lower() for value in polymarket_contracts}
+    receipt_count = confirmed_count = contract_hits = log_count = 0
+    blocks = []
+    for transaction_hash in hashes:
+        receipt = receipt_cache.get(transaction_hash)
+        if not receipt or receipt.get("missing"):
+            continue
+        receipt_count += 1
+        status = receipt.get("status")
+        if status == 1:
+            confirmed_count += 1
+        block_number = receipt.get("block_number")
+        if isinstance(block_number, int):
+            blocks.append(block_number)
+        log_count += int(receipt.get("log_count") or 0)
+        if receipt_has_polymarket_contract(receipt, contracts):
+            contract_hits += 1
+
+    sample_size = len(hashes)
+    verification_rate = confirmed_count / sample_size if sample_size else 0.0
+    contract_rate = contract_hits / sample_size if sample_size else 0.0
+    if not sample_size:
+        status = "no_sample"
+    elif confirmed_count == sample_size:
+        status = "verified"
+    elif confirmed_count:
+        status = "partial"
+    else:
+        status = "unverified"
+    return {
+        "chain_status": status,
+        "chain_sample_size": sample_size,
+        "chain_receipt_count": receipt_count,
+        "chain_confirmed_count": confirmed_count,
+        "chain_verification_rate": round(verification_rate, 4),
+        "polymarket_contract_hit_count": contract_hits,
+        "polymarket_contract_rate": round(contract_rate, 4),
+        "chain_latest_block": max(blocks) if blocks else None,
+        "chain_log_count": log_count,
+    }
+
+
+def apply_chain_filter(
+    metrics: Dict[str, Any], chain_filters: Dict[str, Any]
+) -> Dict[str, Any]:
+    result = dict(metrics)
+    reasons = list(result.get("filter_reasons") or [])
+    if not chain_filters.get("enabled", True):
+        result["filter_reasons"] = reasons
+        result["passes"] = not reasons
+        return result
+    if result.get("chain_confirmed_count", 0) < chain_filters["min_confirmed_transactions"]:
+        reasons.append("chain_confirmed_transactions")
+    if result.get("chain_verification_rate", 0) < chain_filters["min_verification_rate"]:
+        reasons.append("chain_verification_rate")
+    if result.get("polymarket_contract_rate", 0) < chain_filters["min_polymarket_contract_rate"]:
+        reasons.append("polymarket_contract_rate")
+    result["filter_reasons"] = reasons
+    result["passes"] = not reasons
+    return result
+
+
+def enrich_trade_onchain(
+    trade: Dict[str, Any],
+    receipt: Optional[Dict[str, Any]],
+    polymarket_contracts: Iterable[str],
+) -> Dict[str, Any]:
+    result = dict(trade)
+    contracts = {str(value).lower() for value in polymarket_contracts}
+    if not receipt:
+        result.update(
+            {
+                "onchain_status": "not_checked",
+                "onchain_block_number": None,
+                "onchain_polymarket_contract": False,
+            }
+        )
+    elif receipt.get("missing"):
+        result.update(
+            {
+                "onchain_status": "missing",
+                "onchain_block_number": None,
+                "onchain_polymarket_contract": False,
+            }
+        )
+    else:
+        result.update(
+            {
+                "onchain_status": (
+                    "confirmed" if receipt.get("status") == 1 else "reverted"
+                ),
+                "onchain_block_number": receipt.get("block_number"),
+                "onchain_polymarket_contract": receipt_has_polymarket_contract(
+                    receipt, contracts
+                ),
+            }
+        )
+    return result
+
+
+def receipt_has_polymarket_contract(
+    receipt: Dict[str, Any], contracts: Iterable[str]
+) -> bool:
+    contract_set = {str(value).lower() for value in contracts}
+    if str(receipt.get("to") or "").lower() in contract_set:
+        return True
+    return any(
+        str(address).lower() in contract_set
+        for address in receipt.get("log_addresses") or []
+    )
 
 
 def summarize_positions(positions: Iterable[Dict[str, Any]]) -> Dict[str, Any]:

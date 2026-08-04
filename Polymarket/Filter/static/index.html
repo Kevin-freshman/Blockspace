@@ -29,10 +29,10 @@
     <section class="panel filter-panel">
       <div class="section-heading">
         <div>
-          <p class="section-kicker">01 · SCREEN</p>
+        <p class="section-kicker">01 · SCREEN</p>
           <h2>筛选条件</h2>
         </div>
-        <p>排行榜大类固定为 <strong>CRYPTO</strong>。留空结算距离即可不使用该条件。</p>
+        <p>排行榜大类固定为 <strong>CRYPTO</strong>。候选池会按 50 条/页读取，链上验证仅作用于通过前置条件的地址。</p>
       </div>
       <form id="filterForm" class="filter-grid">
         <label>
@@ -53,7 +53,7 @@
         </label>
         <label>
           <span>候选地址数</span>
-          <input name="candidate_limit" type="number" min="1" max="50" value="20">
+          <input name="candidate_limit" type="number" min="1" max="1000" value="200">
         </label>
         <label>
           <span>交易回看窗口（小时）</span>
@@ -79,6 +79,22 @@
           <span>实时轮询（秒）</span>
           <input name="poll_seconds" type="number" min="5" max="300" value="15">
         </label>
+        <label>
+          <span>每地址链上抽样数</span>
+          <input name="chain_receipts_per_address" type="number" min="1" max="50" value="8">
+        </label>
+        <label>
+          <span>最少链上确认交易</span>
+          <input name="min_chain_confirmed_transactions" type="number" min="0" max="50" value="1">
+        </label>
+        <label>
+          <span>最低链上确认率</span>
+          <input name="min_chain_verification_rate" type="number" min="0" max="1" step="0.05" value="0.8">
+        </label>
+        <label>
+          <span>最低官方合约命中率</span>
+          <input name="min_polymarket_contract_rate" type="number" min="0" max="1" step="0.05" value="0">
+        </label>
         <div class="form-action">
           <button id="scanButton" type="submit">
             <span>运行筛选</span>
@@ -103,6 +119,11 @@
         <span>通过筛选</span>
         <strong id="filteredCount">—</strong>
         <small>live tracking</small>
+      </article>
+      <article class="stat-card">
+        <span>链上全量确认</span>
+        <strong id="chainVerifiedCount">—</strong>
+        <small>sampled receipts</small>
       </article>
       <article class="stat-card">
         <span>实时交易</span>
@@ -137,11 +158,12 @@
               <th>频率</th>
               <th>结算距离中位数</th>
               <th>覆盖率</th>
+              <th>Polygon 链上验证</th>
               <th>当前持仓</th>
             </tr>
           </thead>
           <tbody id="addressRows">
-            <tr><td colspan="7" class="empty">运行一次筛选后，结果会显示在这里。</td></tr>
+            <tr><td colspan="8" class="empty">运行一次筛选后，结果会显示在这里。</td></tr>
           </tbody>
         </table>
       </div>
@@ -189,8 +211,8 @@
     </section>
 
     <footer>
-      <p>公开只读数据 · 不连接钱包 · 不执行交易</p>
-      <p>交易频率 = 窗口内交易记录 ÷ 窗口天数；结算距离仅统计计划结算时间晚于交易时间的记录。</p>
+      <p>公开只读数据 + Polygon receipt · 不连接钱包 · 不执行交易</p>
+      <p>链上确认率来自 Polygon 主网交易回执；官方合约命中使用 Polymarket 公布的当前合约地址。</p>
     </footer>
   </main>
   <script src="/app.js" defer></script>

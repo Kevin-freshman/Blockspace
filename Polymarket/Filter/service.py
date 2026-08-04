@@ -15,14 +15,18 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from filter_engine import (
+    apply_chain_filter,
     apply_filter,
     build_address_metrics,
+    enrich_trade_onchain,
     normalize_trade,
+    summarize_chain_receipts,
     summarize_positions,
     trade_key,
     utc_iso,
 )
 from polymarket_client import PolymarketClient
+from polygon_client import PolygonRpcClient
 
 
 def validate_scan_config(payload: Dict[str, Any], base: Dict[str, Any]) -> Dict[str, Any]:
@@ -31,6 +35,7 @@ def validate_scan_config(payload: Dict[str, Any], base: Dict[str, Any]) -> Dict[
     result = copy.deepcopy(base)
     leaderboard = result["leaderboard"]
     filters = result["filter"]
+    chain = result["chain"]
     live = result["live"]
 
     period = str(payload.get("time_period", leaderboard["time_period"])).upper()
@@ -42,7 +47,7 @@ def validate_scan_config(payload: Dict[str, Any], base: Dict[str, Any]) -> Dict[
     leaderboard["time_period"] = period
     leaderboard["order_by"] = order_by
     leaderboard["candidate_limit"] = _bounded_int(
-        payload.get("candidate_limit", leaderboard["candidate_limit"]), 1, 50
+        payload.get("candidate_limit", leaderboard["candidate_limit"]), 1, 1000
     )
 
     filters["lookback_hours"] = _bounded_float(
@@ -75,6 +80,35 @@ def validate_scan_config(payload: Dict[str, Any], base: Dict[str, Any]) -> Dict[
     if minimum is not None and maximum is not None and minimum > maximum:
         raise ValueError("minimum settlement distance cannot exceed maximum")
 
+    chain["receipts_per_address"] = _bounded_int(
+        payload.get("chain_receipts_per_address", chain["receipts_per_address"]),
+        1,
+        50,
+    )
+    chain["min_confirmed_transactions"] = _bounded_int(
+        payload.get(
+            "min_chain_confirmed_transactions",
+            chain["min_confirmed_transactions"],
+        ),
+        0,
+        50,
+    )
+    chain["min_verification_rate"] = _bounded_float(
+        payload.get("min_chain_verification_rate", chain["min_verification_rate"]),
+        0,
+        1,
+    )
+    chain["min_polymarket_contract_rate"] = _bounded_float(
+        payload.get(
+            "min_polymarket_contract_rate",
+            chain["min_polymarket_contract_rate"],
+        ),
+        0,
+        1,
+    )
+    if chain["min_confirmed_transactions"] > chain["receipts_per_address"]:
+        raise ValueError("minimum confirmed transactions cannot exceed receipt sample")
+
     live["poll_seconds"] = _bounded_int(
         payload.get("poll_seconds", live["poll_seconds"]), 5, 300
     )
@@ -87,6 +121,7 @@ class FilterService:
         base_dir: Path,
         config: Dict[str, Any],
         client: Optional[PolymarketClient] = None,
+        chain_client: Optional[PolygonRpcClient] = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self.base_dir = base_dir
@@ -94,11 +129,17 @@ class FilterService:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.base_config = copy.deepcopy(config)
         self.client = client or PolymarketClient()
+        self.chain_client = chain_client or PolygonRpcClient(
+            config["chain"]["rpc_url"], config["chain"]["chain_id"]
+        )
         self.clock = clock
         self.lock = threading.RLock()
         self.stop_event = threading.Event()
         self.market_cache: Dict[str, Dict[str, Any]] = self._load_json(
             self.data_dir / "market_cache.json", {}
+        )
+        self.receipt_cache: Dict[str, Dict[str, Any]] = self._load_json(
+            self.data_dir / "receipt_cache.json", {}
         )
         self.state: Dict[str, Any] = {
             "status": "idle",
@@ -185,6 +226,15 @@ class FilterService:
             "open_position_count",
             "open_position_value",
             "open_position_cash_pnl",
+            "chain_status",
+            "chain_sample_size",
+            "chain_receipt_count",
+            "chain_confirmed_count",
+            "chain_verification_rate",
+            "polymarket_contract_hit_count",
+            "polymarket_contract_rate",
+            "chain_latest_block",
+            "chain_log_count",
             "latest_trade_at",
         ]
         return _csv_bytes(snapshot["filtered_addresses"], fields)
@@ -204,6 +254,9 @@ class FilterService:
             "minutes_to_settlement",
             "condition_id",
             "transaction_hash",
+            "onchain_status",
+            "onchain_block_number",
+            "onchain_polymarket_contract",
         ]
         return _csv_bytes(snapshot["live_trades"], fields)
 
@@ -215,6 +268,22 @@ class FilterService:
                 leaderboard_cfg["order_by"],
                 leaderboard_cfg["candidate_limit"],
             )
+            if config["chain"].get("enabled", True):
+                self._set_progress(
+                    scan_id,
+                    "chain_check",
+                    0,
+                    1,
+                    "正在确认 Polygon 主网链 ID",
+                )
+                self.chain_client.verify_chain()
+                self._set_progress(
+                    scan_id,
+                    "chain_check",
+                    1,
+                    1,
+                    "Polygon 主网链 ID 137 已确认",
+                )
             now_timestamp = int(self.clock())
             cutoff = now_timestamp - int(config["filter"]["lookback_hours"] * 3600)
             self._set_progress(
@@ -253,7 +322,31 @@ class FilterService:
                         "已读取 %d/%d 个候选地址" % (completed, len(futures)),
                     )
 
-            market_ids = self._market_sample_ids(leaderboard, activities, config)
+            # Stage one is intentionally cheap: use count and frequency before
+            # performing market metadata or on-chain lookups.
+            preliminary = []
+            shortlisted_entries = []
+            for entry in leaderboard:
+                address = str(entry.get("proxyWallet") or "").lower()
+                rows, truncated = activities.get(address, ([], False))
+                metrics, _normalized = build_address_metrics(
+                    entry,
+                    rows,
+                    self.market_cache,
+                    config["filter"]["lookback_hours"],
+                    now_timestamp,
+                    truncated,
+                )
+                metrics = apply_filter(
+                    metrics, config["filter"], check_settlement=False
+                )
+                preliminary.append(metrics)
+                if metrics["passes"]:
+                    shortlisted_entries.append(entry)
+
+            market_ids = self._market_sample_ids(
+                shortlisted_entries, activities, config
+            )
             missing_ids = [cid for cid in market_ids if cid not in self.market_cache]
             self._set_progress(
                 scan_id,
@@ -284,6 +377,35 @@ class FilterService:
                 normalized_by_address[address] = normalized
                 addresses.append(metrics)
             addresses.sort(key=lambda item: item.get("rank") or 10 ** 9)
+            offchain_filtered = [item for item in addresses if item["passes"]]
+
+            chain_errors: List[Dict[str, str]] = []
+            if config["chain"].get("enabled", True) and offchain_filtered:
+                samples = self._chain_samples(
+                    offchain_filtered, normalized_by_address, config
+                )
+                all_hashes = [
+                    transaction_hash
+                    for hashes in samples.values()
+                    for transaction_hash in hashes
+                ]
+                self._ensure_receipts(scan_id, all_hashes, config)
+                contracts = config["chain"]["polymarket_contracts"]
+                chain_map = {}
+                for item in offchain_filtered:
+                    updated = dict(item)
+                    updated.update(
+                        summarize_chain_receipts(
+                            samples.get(item["address"], []),
+                            self.receipt_cache,
+                            contracts,
+                        )
+                    )
+                    updated = apply_chain_filter(updated, config["chain"])
+                    chain_map[item["address"]] = updated
+                addresses = [
+                    chain_map.get(item["address"], item) for item in addresses
+                ]
             filtered = [item for item in addresses if item["passes"]]
 
             self._set_progress(
@@ -301,9 +423,17 @@ class FilterService:
 
             live_seed: List[Dict[str, Any]] = []
             names = {item["address"]: item.get("user_name") or "" for item in filtered}
+            contracts = config["chain"]["polymarket_contracts"]
             for address in filtered_map:
                 for trade in normalized_by_address.get(address, []):
-                    row = dict(trade)
+                    transaction_hash = str(
+                        trade.get("transaction_hash") or ""
+                    ).lower()
+                    row = enrich_trade_onchain(
+                        trade,
+                        self.receipt_cache.get(transaction_hash),
+                        contracts,
+                    )
                     row["user_name"] = names.get(address, "")
                     live_seed.append(row)
             live_seed.sort(key=lambda item: item.get("timestamp") or 0, reverse=True)
@@ -315,6 +445,7 @@ class FilterService:
                 for address, message in activity_errors.items()
             )
             errors.extend(market_errors)
+            errors.extend(chain_errors)
             errors.extend(position_errors)
             finished = int(self.clock())
             with self.lock:
@@ -415,6 +546,84 @@ class FilterService:
                 )
         return errors
 
+    def _chain_samples(
+        self,
+        addresses: Iterable[Dict[str, Any]],
+        normalized_by_address: Dict[str, List[Dict[str, Any]]],
+        config: Dict[str, Any],
+    ) -> Dict[str, List[str]]:
+        cap = config["chain"]["receipts_per_address"]
+        samples: Dict[str, List[str]] = {}
+        for item in addresses:
+            address = item["address"]
+            hashes = []
+            seen = set()
+            for trade in normalized_by_address.get(address, []):
+                transaction_hash = str(
+                    trade.get("transaction_hash") or ""
+                ).lower()
+                if (
+                    len(transaction_hash) != 66
+                    or not transaction_hash.startswith("0x")
+                    or transaction_hash in seen
+                ):
+                    continue
+                seen.add(transaction_hash)
+                hashes.append(transaction_hash)
+                if len(hashes) >= cap:
+                    break
+            samples[address] = hashes
+        return samples
+
+    def _ensure_receipts(
+        self, scan_id: str, transaction_hashes: Iterable[str], config: Dict[str, Any]
+    ) -> None:
+        now_timestamp = int(self.clock())
+        ordered = list(dict.fromkeys(str(value).lower() for value in transaction_hashes))
+        missing = []
+        for transaction_hash in ordered:
+            cached = self.receipt_cache.get(transaction_hash)
+            if cached is None:
+                missing.append(transaction_hash)
+            elif cached.get("missing") and now_timestamp - int(
+                cached.get("checked_at") or 0
+            ) >= 60:
+                missing.append(transaction_hash)
+        self._set_progress(
+            scan_id,
+            "chain_receipts",
+            0,
+            len(missing),
+            "正在读取 Polygon 链上交易回执",
+        )
+        batch_size = config["chain"]["batch_size"]
+        completed = 0
+        for start in range(0, len(missing), batch_size):
+            chunk = missing[start : start + batch_size]
+            receipts = self.chain_client.transaction_receipts(chunk, batch_size)
+            for transaction_hash in chunk:
+                receipt = receipts.get(transaction_hash)
+                if receipt is None:
+                    self.receipt_cache[transaction_hash] = {
+                        "transaction_hash": transaction_hash,
+                        "missing": True,
+                        "checked_at": now_timestamp,
+                    }
+                else:
+                    stored = dict(receipt)
+                    stored["checked_at"] = now_timestamp
+                    self.receipt_cache[transaction_hash] = stored
+            completed += len(chunk)
+            self._set_progress(
+                scan_id,
+                "chain_receipts",
+                completed,
+                len(missing),
+                "已验证 %d/%d 笔链上交易" % (completed, len(missing)),
+            )
+        if missing:
+            self._save_receipt_cache()
+
     def _attach_positions(
         self,
         scan_id: str,
@@ -508,10 +717,28 @@ class FilterService:
         if unique_unseen:
             self._save_market_cache()
 
+        live_hashes = list(
+            dict.fromkeys(
+                str(row.get("transactionHash") or "").lower()
+                for row in raw_rows
+                if row.get("transactionHash")
+            )
+        )[: config["chain"]["live_receipts_per_poll"]]
+        if config["chain"].get("enabled", True) and live_hashes:
+            try:
+                self._ensure_receipts("live-" + scan_id, live_hashes, config)
+            except Exception as exc:
+                errors.append({"scope": "live-chain", "message": str(exc)})
+
         normalized = []
+        contracts = config["chain"]["polymarket_contracts"]
         for raw in raw_rows:
             condition_id = str(raw.get("conditionId") or "").lower()
             row = normalize_trade(raw, self.market_cache.get(condition_id))
+            transaction_hash = str(row.get("transaction_hash") or "").lower()
+            row = enrich_trade_onchain(
+                row, self.receipt_cache.get(transaction_hash), contracts
+            )
             row["user_name"] = names.get(row["address"], "")
             normalized.append(row)
 
@@ -583,6 +810,9 @@ class FilterService:
 
     def _save_market_cache(self) -> None:
         self._save_json(self.data_dir / "market_cache.json", self.market_cache)
+
+    def _save_receipt_cache(self) -> None:
+        self._save_json(self.data_dir / "receipt_cache.json", self.receipt_cache)
 
     def _save_snapshot(self) -> None:
         self._save_json(self.data_dir / "snapshot.json", self.snapshot())

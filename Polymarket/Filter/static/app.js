@@ -28,6 +28,10 @@ form.addEventListener("submit", async (event) => {
     min_median_hours_to_settlement: optionalNumber("min_median_hours_to_settlement"),
     max_median_hours_to_settlement: optionalNumber("max_median_hours_to_settlement"),
     poll_seconds: Number(data.get("poll_seconds")),
+    chain_receipts_per_address: Number(data.get("chain_receipts_per_address")),
+    min_chain_confirmed_transactions: Number(data.get("min_chain_confirmed_transactions")),
+    min_chain_verification_rate: Number(data.get("min_chain_verification_rate")),
+    min_polymarket_contract_rate: Number(data.get("min_polymarket_contract_rate")),
   };
   scanButton.disabled = true;
   try {
@@ -74,6 +78,9 @@ function render(state) {
 
   document.querySelector("#candidateCount").textContent = formatInt((state.addresses || []).length);
   document.querySelector("#filteredCount").textContent = formatInt((state.filtered_addresses || []).length);
+  document.querySelector("#chainVerifiedCount").textContent = formatInt(
+    (state.filtered_addresses || []).filter((row) => row.chain_status === "verified").length
+  );
   document.querySelector("#tradeCount").textContent = formatInt((state.live_trades || []).length);
   document.querySelector("#lastUpdated").textContent = state.last_live_at ? formatClock(state.last_live_at) : "—";
 
@@ -85,7 +92,7 @@ function render(state) {
 function renderAddresses(rows) {
   if (!rows.length) {
     const message = latestState?.status === "ready" ? "当前条件下没有地址通过筛选。" : "运行一次筛选后，结果会显示在这里。";
-    addressRows.innerHTML = `<tr><td colspan="7" class="empty">${message}</td></tr>`;
+    addressRows.innerHTML = `<tr><td colspan="8" class="empty">${message}</td></tr>`;
     return;
   }
   addressRows.innerHTML = rows.map((row) => {
@@ -103,6 +110,7 @@ function renderAddresses(rows) {
       <td><span class="metric">${formatNumber(row.trades_per_day, 1)}</span><span class="cell-sub">次 / 天</span></td>
       <td><span class="metric">${row.median_hours_to_settlement == null ? "—" : formatDurationHours(row.median_hours_to_settlement)}</span><span class="cell-sub">median before end</span></td>
       <td><span class="metric">${formatPercent(coverage)}</span><span class="cell-sub">${formatInt(row.settlement_trade_count)} records</span></td>
+      <td><span class="metric ${row.chain_status === "verified" ? "positive" : "negative"}">${formatInt(row.chain_confirmed_count)} / ${formatInt(row.chain_sample_size)}</span><span class="cell-sub">${formatPercent(row.chain_verification_rate)} confirmed · ${formatInt(row.polymarket_contract_hit_count)} contract hits</span></td>
       <td><span class="metric">${row.open_position_count == null ? "—" : formatInt(row.open_position_count)}</span><span class="cell-sub">${row.open_position_value == null ? "" : formatMoney(row.open_position_value)}</span></td>
     </tr>`;
   }).join("");
@@ -129,7 +137,7 @@ function renderTrades(rows) {
       <td><span class="metric">${formatNumber(row.size, 2)}</span><span class="cell-sub">${row.usdc_size ? formatMoney(row.usdc_size) : "shares"}</span></td>
       <td><span class="metric">${formatNumber(row.price, 4)}</span></td>
       <td><span class="metric ${Number(row.minutes_to_settlement) < 0 ? "negative" : ""}">${distance}</span></td>
-      <td>${tx ? `<a class="evidence-link" href="https://polygonscan.com/tx/${tx}" target="_blank" rel="noreferrer">TX ↗</a>` : "—"}</td>
+      <td><span class="badge ${row.onchain_status === "confirmed" ? "buy" : ""}">${row.onchain_status === "confirmed" ? "CHAIN ✓" : escapeHtml(row.onchain_status || "pending")}</span>${tx ? ` <a class="evidence-link" href="https://polygonscan.com/tx/${tx}" target="_blank" rel="noreferrer">TX ↗</a>` : ""}</td>
     </tr>`;
   }).join("");
 }

@@ -7,12 +7,17 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_DIR))
 
 from filter_engine import (  # noqa: E402
+    apply_chain_filter,
     apply_filter,
     build_address_metrics,
+    enrich_trade_onchain,
     normalize_trade,
+    summarize_chain_receipts,
     summarize_positions,
     trade_key,
 )
+from polygon_client import normalize_receipt  # noqa: E402
+from polymarket_client import PolymarketClient  # noqa: E402
 from service import validate_scan_config  # noqa: E402
 
 
@@ -102,6 +107,53 @@ class FilterEngineTests(unittest.TestCase):
         self.assertEqual(result["open_position_value"], 15.5)
         self.assertEqual(result["open_position_cash_pnl"], 1.0)
 
+    def test_chain_receipt_metrics_and_filter(self):
+        first_hash = "0x" + "1" * 64
+        second_hash = "0x" + "2" * 64
+        contract = "0x" + "c" * 40
+        metrics = summarize_chain_receipts(
+            [first_hash, second_hash],
+            {
+                first_hash: {
+                    "status": 1,
+                    "block_number": 123,
+                    "to": "0x" + "d" * 40,
+                    "log_count": 3,
+                    "log_addresses": [contract],
+                },
+                second_hash: {"missing": True},
+            },
+            [contract],
+        )
+        self.assertEqual(metrics["chain_confirmed_count"], 1)
+        self.assertEqual(metrics["chain_verification_rate"], 0.5)
+        self.assertEqual(metrics["polymarket_contract_hit_count"], 1)
+        result = apply_chain_filter(
+            dict(metrics, filter_reasons=[]),
+            {
+                "enabled": True,
+                "min_confirmed_transactions": 1,
+                "min_verification_rate": 0.5,
+                "min_polymarket_contract_rate": 0.5,
+            },
+        )
+        self.assertTrue(result["passes"])
+
+    def test_trade_receipt_enrichment(self):
+        contract = "0x" + "c" * 40
+        enriched = enrich_trade_onchain(
+            {"transaction_hash": "0x" + "1" * 64},
+            {
+                "status": 1,
+                "block_number": 123,
+                "to": contract,
+                "log_addresses": [],
+            },
+            [contract],
+        )
+        self.assertEqual(enriched["onchain_status"], "confirmed")
+        self.assertTrue(enriched["onchain_polymarket_contract"])
+
     @staticmethod
     def _trade(timestamp, condition_id, transaction_hash):
         return {
@@ -139,6 +191,21 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertEqual(result["leaderboard"]["candidate_limit"], 12)
         self.assertIsNone(result["filter"]["max_median_hours_to_settlement"])
 
+    def test_large_candidate_pool_and_chain_controls(self):
+        result = validate_scan_config(
+            {
+                "candidate_limit": 1000,
+                "chain_receipts_per_address": 12,
+                "min_chain_confirmed_transactions": 2,
+                "min_chain_verification_rate": 0.75,
+                "min_polymarket_contract_rate": 0.25,
+            },
+            self.base,
+        )
+        self.assertEqual(result["leaderboard"]["candidate_limit"], 1000)
+        self.assertEqual(result["chain"]["receipts_per_address"], 12)
+        self.assertEqual(result["chain"]["min_verification_rate"], 0.75)
+
     def test_invalid_distance_range_is_rejected(self):
         with self.assertRaises(ValueError):
             validate_scan_config(
@@ -148,6 +215,44 @@ class ConfigValidationTests(unittest.TestCase):
                 },
                 self.base,
             )
+
+
+class ClientTests(unittest.TestCase):
+    def test_leaderboard_paginates_in_pages_of_fifty(self):
+        class FakeClient(PolymarketClient):
+            def __init__(self):
+                self.calls = []
+
+            def _get(self, _url, params):
+                self.calls.append(dict(params))
+                return [
+                    {
+                        "rank": str(index + 1),
+                        "proxyWallet": "0x%040x" % (index + 1),
+                    }
+                    for index in range(params["offset"], params["offset"] + params["limit"])
+                ]
+
+        client = FakeClient()
+        rows = client.leaderboard("WEEK", "PNL", 125)
+        self.assertEqual(len(rows), 125)
+        self.assertEqual([call["offset"] for call in client.calls], [0, 50, 100])
+        self.assertEqual([call["limit"] for call in client.calls], [50, 50, 25])
+
+    def test_polygon_receipt_normalization(self):
+        transaction_hash = "0x" + "1" * 64
+        receipt = normalize_receipt(
+            {
+                "transactionHash": transaction_hash,
+                "status": "0x1",
+                "blockNumber": "0x10",
+                "to": "0x" + "a" * 40,
+                "logs": [{"address": "0x" + "b" * 40}],
+            }
+        )
+        self.assertEqual(receipt["status"], 1)
+        self.assertEqual(receipt["block_number"], 16)
+        self.assertEqual(receipt["log_count"], 1)
 
 
 if __name__ == "__main__":

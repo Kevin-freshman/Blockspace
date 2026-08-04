@@ -39,6 +39,11 @@ class FilterHandler(BaseHTTPRequestHandler):
                     "status": snapshot["status"],
                     "candidates": len(snapshot["addresses"]),
                     "filtered": len(snapshot["filtered_addresses"]),
+                    "chain_verified_addresses": sum(
+                        1
+                        for item in snapshot["filtered_addresses"]
+                        if item.get("chain_status") == "verified"
+                    ),
                     "live_events": len(snapshot["live_trades"]),
                 },
             )
