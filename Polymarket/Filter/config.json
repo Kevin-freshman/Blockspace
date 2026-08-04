@@ -1,0 +1,30 @@
+{
+  "leaderboard": {
+    "time_period": "WEEK",
+    "order_by": "PNL",
+    "candidate_limit": 20
+  },
+  "filter": {
+    "lookback_hours": 168,
+    "min_trade_count": 10,
+    "min_trades_per_day": 1.0,
+    "min_median_hours_to_settlement": 0,
+    "max_median_hours_to_settlement": 24
+  },
+  "sampling": {
+    "activity_page_size": 500,
+    "max_activity_pages": 3,
+    "settlement_markets_per_address": 16,
+    "max_workers": 8
+  },
+  "live": {
+    "poll_seconds": 15,
+    "activity_limit": 100,
+    "positions_refresh_seconds": 60,
+    "max_events": 1000
+  },
+  "http": {
+    "host": "127.0.0.1",
+    "port": 8788
+  }
+}

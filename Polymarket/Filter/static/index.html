@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polymarket Crypto Filter</title>
+  <meta name="description" content="Polymarket CRYPTO 排行榜地址筛选与实时交易观察">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">BLOCKSPACE · READ-ONLY SIGNAL LAYER</p>
+        <h1>Polymarket <span>Crypto Filter</span></h1>
+        <p class="subtitle">从 CRYPTO 排行榜压缩候选集，再持续观察通过筛选的地址。</p>
+      </div>
+      <div class="status-wrap">
+        <span id="statusDot" class="status-dot idle"></span>
+        <div>
+          <span class="status-label">运行状态</span>
+          <strong id="statusText">等待扫描</strong>
+        </div>
+      </div>
+    </header>
+
+    <section class="panel filter-panel">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">01 · SCREEN</p>
+          <h2>筛选条件</h2>
+        </div>
+        <p>排行榜大类固定为 <strong>CRYPTO</strong>。留空结算距离即可不使用该条件。</p>
+      </div>
+      <form id="filterForm" class="filter-grid">
+        <label>
+          <span>排行榜周期</span>
+          <select name="time_period">
+            <option value="DAY">24 小时</option>
+            <option value="WEEK" selected>7 天</option>
+            <option value="MONTH">30 天</option>
+            <option value="ALL">全部</option>
+          </select>
+        </label>
+        <label>
+          <span>排序</span>
+          <select name="order_by">
+            <option value="PNL" selected>PNL</option>
+            <option value="VOL">成交量</option>
+          </select>
+        </label>
+        <label>
+          <span>候选地址数</span>
+          <input name="candidate_limit" type="number" min="1" max="50" value="20">
+        </label>
+        <label>
+          <span>交易回看窗口（小时）</span>
+          <input name="lookback_hours" type="number" min="1" max="2160" value="168">
+        </label>
+        <label>
+          <span>最少交易记录</span>
+          <input name="min_trade_count" type="number" min="0" value="10">
+        </label>
+        <label>
+          <span>最低频率（次/天）</span>
+          <input name="min_trades_per_day" type="number" min="0" step="0.1" value="1">
+        </label>
+        <label>
+          <span>最短结算距离（小时）</span>
+          <input name="min_median_hours_to_settlement" type="number" min="0" step="0.1" value="0">
+        </label>
+        <label>
+          <span>最长结算距离（小时）</span>
+          <input name="max_median_hours_to_settlement" type="number" min="0" step="0.1" value="24">
+        </label>
+        <label>
+          <span>实时轮询（秒）</span>
+          <input name="poll_seconds" type="number" min="5" max="300" value="15">
+        </label>
+        <div class="form-action">
+          <button id="scanButton" type="submit">
+            <span>运行筛选</span>
+            <span class="arrow">↗</span>
+          </button>
+        </div>
+      </form>
+      <div id="progressWrap" class="progress-wrap" hidden>
+        <div class="progress-track"><span id="progressBar"></span></div>
+        <p id="progressText">准备中</p>
+      </div>
+      <p id="formError" class="error-message" hidden></p>
+    </section>
+
+    <section class="stats-grid" aria-label="筛选摘要">
+      <article class="stat-card">
+        <span>排行榜候选</span>
+        <strong id="candidateCount">—</strong>
+        <small>CRYPTO addresses</small>
+      </article>
+      <article class="stat-card accent">
+        <span>通过筛选</span>
+        <strong id="filteredCount">—</strong>
+        <small>live tracking</small>
+      </article>
+      <article class="stat-card">
+        <span>实时交易</span>
+        <strong id="tradeCount">—</strong>
+        <small>retained events</small>
+      </article>
+      <article class="stat-card">
+        <span>最后更新</span>
+        <strong id="lastUpdated">—</strong>
+        <small>UTC source time</small>
+      </article>
+    </section>
+
+    <section class="panel result-panel">
+      <div class="section-heading compact">
+        <div>
+          <p class="section-kicker">02 · QUALIFY</p>
+          <h2>通过筛选的地址</h2>
+        </div>
+        <div class="export-row">
+          <a href="/api/export/addresses.csv">地址 CSV</a>
+          <a href="/api/export/snapshot.json">完整 JSON</a>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>排名 / 地址</th>
+              <th>榜单 PNL</th>
+              <th>交易 / 交易哈希</th>
+              <th>频率</th>
+              <th>结算距离中位数</th>
+              <th>覆盖率</th>
+              <th>当前持仓</th>
+            </tr>
+          </thead>
+          <tbody id="addressRows">
+            <tr><td colspan="7" class="empty">运行一次筛选后，结果会显示在这里。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel live-panel">
+      <div class="section-heading compact">
+        <div>
+          <p class="section-kicker live-kicker"><span></span>03 · LIVE FEED</p>
+          <h2>地址实时活动</h2>
+        </div>
+        <div class="export-row">
+          <a href="/api/export/trades.csv">交易 CSV</a>
+        </div>
+      </div>
+      <div class="table-wrap live-table">
+        <table>
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>地址</th>
+              <th>方向</th>
+              <th>市场 / 结果</th>
+              <th>规模</th>
+              <th>价格</th>
+              <th>距结算</th>
+              <th>证据</th>
+            </tr>
+          </thead>
+          <tbody id="tradeRows">
+            <tr><td colspan="8" class="empty">通过筛选的地址会自动进入轮询。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="errorPanel" class="panel error-panel" hidden>
+      <div class="section-heading compact">
+        <div>
+          <p class="section-kicker">DIAGNOSTICS</p>
+          <h2>部分请求未完成</h2>
+        </div>
+      </div>
+      <ul id="errorRows"></ul>
+    </section>
+
+    <footer>
+      <p>公开只读数据 · 不连接钱包 · 不执行交易</p>
+      <p>交易频率 = 窗口内交易记录 ÷ 窗口天数；结算距离仅统计计划结算时间晚于交易时间的记录。</p>
+    </footer>
+  </main>
+  <script src="/app.js" defer></script>
+</body>
+</html>
