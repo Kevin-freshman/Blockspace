@@ -15,7 +15,7 @@
       <div>
         <p class="eyebrow">BLOCKSPACE · READ-ONLY SIGNAL LAYER</p>
         <h1>Polymarket <span>Crypto Filter</span></h1>
-        <p class="subtitle">从 CRYPTO 排行榜压缩候选集，再持续观察通过筛选的地址。</p>
+        <p class="subtitle">从公开榜单候选池中找出交易活跃、收益效率可选达标的地址。</p>
       </div>
       <div class="status-wrap">
         <span id="statusDot" class="status-dot idle"></span>
@@ -30,70 +30,22 @@
       <div class="section-heading">
         <div>
         <p class="section-kicker">01 · SCREEN</p>
-          <h2>筛选条件</h2>
+          <h2>高频地址筛选</h2>
         </div>
-        <p>排行榜大类固定为 <strong>CRYPTO</strong>。候选池会按 50 条/页读取，链上验证仅作用于通过前置条件的地址。</p>
+        <p><strong>200 个候选怎么来：</strong>在相同时间范围内，先取 Polymarket 官方 CRYPTO PNL 榜前 200 名，再逐个计算交易频率。官方榜单不提供“按频率排序”，200 只是控制扫描耗时的上限；所以这不是全站高频前 200，也可能遗漏榜外高频地址。</p>
       </div>
       <form id="filterForm" class="filter-grid">
         <label>
-          <span>排行榜周期</span>
-          <select name="time_period">
-            <option value="DAY">24 小时</option>
-            <option value="WEEK" selected>7 天</option>
-            <option value="MONTH">30 天</option>
-            <option value="ALL">全部</option>
+          <span>分析时间范围</span>
+          <select name="lookback_hours">
+            <option value="24">最近 24 小时</option>
+            <option value="168" selected>最近 7 天</option>
+            <option value="720">最近 30 天</option>
           </select>
         </label>
         <label>
-          <span>排序</span>
-          <select name="order_by">
-            <option value="PNL" selected>PNL</option>
-            <option value="VOL">成交量</option>
-          </select>
-        </label>
-        <label>
-          <span>候选地址数</span>
-          <input name="candidate_limit" type="number" min="1" max="1000" value="200">
-        </label>
-        <label>
-          <span>交易回看窗口（小时）</span>
-          <input name="lookback_hours" type="number" min="1" max="2160" value="168">
-        </label>
-        <label>
-          <span>最少交易记录</span>
-          <input name="min_trade_count" type="number" min="0" value="10">
-        </label>
-        <label>
-          <span>最低频率（次/天）</span>
+          <span>最低交易频率（成交记录/天）</span>
           <input name="min_trades_per_day" type="number" min="0" step="0.1" value="1">
-        </label>
-        <label>
-          <span>最短结算距离（小时）</span>
-          <input name="min_median_hours_to_settlement" type="number" min="0" step="0.1" value="0">
-        </label>
-        <label>
-          <span>最长结算距离（小时）</span>
-          <input name="max_median_hours_to_settlement" type="number" min="0" step="0.1" value="24">
-        </label>
-        <label>
-          <span>实时轮询（秒）</span>
-          <input name="poll_seconds" type="number" min="5" max="300" value="15">
-        </label>
-        <label>
-          <span>每地址链上抽样数</span>
-          <input name="chain_receipts_per_address" type="number" min="1" max="50" value="8">
-        </label>
-        <label>
-          <span>最少链上确认交易</span>
-          <input name="min_chain_confirmed_transactions" type="number" min="0" max="50" value="1">
-        </label>
-        <label>
-          <span>最低链上确认率</span>
-          <input name="min_chain_verification_rate" type="number" min="0" max="1" step="0.05" value="0.8">
-        </label>
-        <label>
-          <span>最低官方合约命中率</span>
-          <input name="min_polymarket_contract_rate" type="number" min="0" max="1" step="0.05" value="0">
         </label>
         <div class="form-action">
           <button id="scanButton" type="submit">
@@ -101,6 +53,29 @@
             <span class="arrow">↗</span>
           </button>
         </div>
+        <details class="advanced-options">
+          <summary>收益筛选与排序（可选）</summary>
+          <div class="advanced-grid">
+            <label>
+              <span>最低总收益效率（%，PNL ÷ 成交量）</span>
+              <input name="min_return_efficiency_percent" type="number" step="0.1" placeholder="不限制">
+            </label>
+            <label>
+              <span>最低平均每条成交 PNL（USD，估算）</span>
+              <input name="min_estimated_pnl_per_activity" type="number" step="0.01" placeholder="不限制">
+            </label>
+            <label>
+              <span>结果排序</span>
+              <select name="result_sort">
+                <option value="FREQUENCY" selected>交易频率（高到低）</option>
+                <option value="RETURN">总收益效率（高到低）</option>
+                <option value="AVG_PNL">平均每条成交 PNL（高到低）</option>
+                <option value="PNL">区间 PNL（高到低）</option>
+              </select>
+            </label>
+          </div>
+          <p>这里的收益项默认不参与筛选；留空即可只按时间范围和最低交易频率筛选。</p>
+        </details>
       </form>
       <div id="progressWrap" class="progress-wrap" hidden>
         <div class="progress-track"><span id="progressBar"></span></div>
@@ -121,11 +96,6 @@
         <small>live tracking</small>
       </article>
       <article class="stat-card">
-        <span>链上全量确认</span>
-        <strong id="chainVerifiedCount">—</strong>
-        <small>sampled receipts</small>
-      </article>
-      <article class="stat-card">
         <span>实时交易</span>
         <strong id="tradeCount">—</strong>
         <small>retained events</small>
@@ -136,6 +106,8 @@
         <small>UTC source time</small>
       </article>
     </section>
+
+    <p class="metric-note"><strong>收益口径：</strong>总收益效率 = 官方榜单区间 PNL ÷ 同期成交量，是可比较的代理指标，不是本金 ROI；平均每条成交 PNL = 区间 PNL ÷ 同期成交记录数，也只是估算。公开数据无法可靠配对开仓、部分平仓与结算，因此不伪造“单笔真实收益率”；成交记录达到读取上限时，该估算显示为未知。</p>
 
     <section class="panel result-panel">
       <div class="section-heading compact">
@@ -153,17 +125,15 @@
           <thead>
             <tr>
               <th>排名 / 地址</th>
-              <th>榜单 PNL</th>
+              <th>区间 PNL / 总收益效率</th>
+              <th>平均每条成交 PNL</th>
               <th>交易 / 交易哈希</th>
               <th>频率</th>
-              <th>结算距离中位数</th>
-              <th>覆盖率</th>
-              <th>Polygon 链上验证</th>
               <th>当前持仓</th>
             </tr>
           </thead>
           <tbody id="addressRows">
-            <tr><td colspan="8" class="empty">运行一次筛选后，结果会显示在这里。</td></tr>
+            <tr><td colspan="6" class="empty">运行一次筛选后，结果会显示在这里。</td></tr>
           </tbody>
         </table>
       </div>
@@ -211,8 +181,8 @@
     </section>
 
     <footer>
-      <p>公开只读数据 + Polygon receipt · 不连接钱包 · 不执行交易</p>
-      <p>链上确认率来自 Polygon 主网交易回执；官方合约命中使用 Polymarket 公布的当前合约地址。</p>
+      <p>公开只读数据 · 不连接钱包 · 不执行交易</p>
+      <p>筛选只使用时间范围、交易频率和可选收益效率，不以展示型指标隐式淘汰地址。</p>
     </footer>
   </main>
   <script src="/app.js" defer></script>

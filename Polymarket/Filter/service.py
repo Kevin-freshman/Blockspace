@@ -59,6 +59,25 @@ def validate_scan_config(payload: Dict[str, Any], base: Dict[str, Any]) -> Dict[
     filters["min_trades_per_day"] = _bounded_float(
         payload.get("min_trades_per_day", filters["min_trades_per_day"]), 0, 100000
     )
+    filters["min_return_efficiency"] = _optional_bounded_float(
+        payload.get("min_return_efficiency", filters.get("min_return_efficiency")),
+        -1000,
+        1000,
+    )
+    filters["min_estimated_pnl_per_activity"] = _optional_bounded_float(
+        payload.get(
+            "min_estimated_pnl_per_activity",
+            filters.get("min_estimated_pnl_per_activity"),
+        ),
+        -1000000000,
+        1000000000,
+    )
+    result_sort = str(
+        payload.get("result_sort", filters.get("result_sort", "FREQUENCY"))
+    ).upper()
+    if result_sort not in {"FREQUENCY", "RETURN", "AVG_PNL", "PNL"}:
+        raise ValueError("result_sort must be FREQUENCY, RETURN, AVG_PNL, or PNL")
+    filters["result_sort"] = result_sort
     filters["min_median_hours_to_settlement"] = _optional_bounded_float(
         payload.get(
             "min_median_hours_to_settlement",
@@ -217,6 +236,8 @@ class FilterService:
             "verified",
             "leaderboard_pnl",
             "leaderboard_volume",
+            "return_efficiency",
+            "estimated_pnl_per_activity",
             "trade_count",
             "transaction_count",
             "trades_per_day",
@@ -344,8 +365,17 @@ class FilterService:
                 if metrics["passes"]:
                     shortlisted_entries.append(entry)
 
-            market_ids = self._market_sample_ids(
-                shortlisted_entries, activities, config
+            settlement_filter_enabled = any(
+                config["filter"].get(name) is not None
+                for name in (
+                    "min_median_hours_to_settlement",
+                    "max_median_hours_to_settlement",
+                )
+            )
+            market_ids = (
+                self._market_sample_ids(shortlisted_entries, activities, config)
+                if settlement_filter_enabled
+                else []
             )
             missing_ids = [cid for cid in market_ids if cid not in self.market_cache]
             self._set_progress(
@@ -407,6 +437,23 @@ class FilterService:
                     chain_map.get(item["address"], item) for item in addresses
                 ]
             filtered = [item for item in addresses if item["passes"]]
+            sort_field = {
+                "FREQUENCY": "trades_per_day",
+                "RETURN": "return_efficiency",
+                "AVG_PNL": "estimated_pnl_per_activity",
+                "PNL": "leaderboard_pnl",
+            }[config["filter"].get("result_sort", "FREQUENCY")]
+            filtered.sort(
+                key=lambda item: (
+                    item.get(sort_field) is not None,
+                    (
+                        item.get(sort_field)
+                        if item.get(sort_field) is not None
+                        else float("-inf")
+                    ),
+                ),
+                reverse=True,
+            )
 
             self._set_progress(
                 scan_id,

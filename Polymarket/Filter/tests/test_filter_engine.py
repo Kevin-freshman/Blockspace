@@ -39,7 +39,13 @@ class FilterEngineTests(unittest.TestCase):
             CONDITION_B: {"end_timestamp": now - 1200 + 7200},
         }
         metrics, normalized = build_address_metrics(
-            {"rank": "1", "proxyWallet": ADDRESS, "userName": "alpha", "pnl": 12},
+            {
+                "rank": "1",
+                "proxyWallet": ADDRESS,
+                "userName": "alpha",
+                "pnl": 12,
+                "vol": 100,
+            },
             trades,
             markets,
             lookback_hours=24,
@@ -48,6 +54,8 @@ class FilterEngineTests(unittest.TestCase):
         self.assertEqual(metrics["trade_count"], 2)
         self.assertEqual(metrics["transaction_count"], 2)
         self.assertEqual(metrics["trades_per_day"], 2.0)
+        self.assertEqual(metrics["return_efficiency"], 0.12)
+        self.assertEqual(metrics["estimated_pnl_per_activity"], 6.0)
         self.assertEqual(metrics["median_hours_to_settlement"], 1.5)
         self.assertEqual(metrics["settlement_coverage"], 1.0)
         self.assertEqual(len(normalized), 2)
@@ -90,6 +98,62 @@ class FilterEngineTests(unittest.TestCase):
         first = self._trade(100, CONDITION_A, "0x" + "1" * 64)
         second = dict(first, asset="other", size=12)
         self.assertNotEqual(trade_key(first), trade_key(second))
+
+    def test_optional_return_efficiency_filter(self):
+        result = apply_filter(
+            {
+                "trade_count": 5,
+                "trades_per_day": 5,
+                "return_efficiency": 0.08,
+                "median_hours_to_settlement": None,
+            },
+            {
+                "min_trade_count": 0,
+                "min_trades_per_day": 1,
+                "min_return_efficiency": 0.1,
+                "min_median_hours_to_settlement": None,
+                "max_median_hours_to_settlement": None,
+            },
+        )
+        self.assertFalse(result["passes"])
+        self.assertIn("return_efficiency", result["filter_reasons"])
+
+    def test_estimated_pnl_per_activity_is_unknown_when_activity_is_capped(self):
+        metrics, _ = build_address_metrics(
+            {
+                "rank": "1",
+                "proxyWallet": ADDRESS,
+                "pnl": 12,
+                "vol": 100,
+            },
+            [self._trade(2_000_000 - 600, CONDITION_A, "0x" + "1" * 64)],
+            {},
+            lookback_hours=24,
+            now_timestamp=2_000_000,
+            truncated=True,
+        )
+        self.assertIsNone(metrics["estimated_pnl_per_activity"])
+
+    def test_optional_estimated_pnl_per_activity_filter(self):
+        result = apply_filter(
+            {
+                "trade_count": 5,
+                "trades_per_day": 5,
+                "return_efficiency": 0.08,
+                "estimated_pnl_per_activity": 1.25,
+                "median_hours_to_settlement": None,
+            },
+            {
+                "min_trade_count": 0,
+                "min_trades_per_day": 1,
+                "min_return_efficiency": None,
+                "min_estimated_pnl_per_activity": 2,
+                "min_median_hours_to_settlement": None,
+                "max_median_hours_to_settlement": None,
+            },
+        )
+        self.assertFalse(result["passes"])
+        self.assertIn("estimated_pnl_per_activity", result["filter_reasons"])
 
     def test_normalize_trade_preserves_signed_distance(self):
         trade = self._trade(1000, CONDITION_A, "0x" + "1" * 64)
@@ -190,6 +254,19 @@ class ConfigValidationTests(unittest.TestCase):
         self.assertEqual(result["leaderboard"]["order_by"], "VOL")
         self.assertEqual(result["leaderboard"]["candidate_limit"], 12)
         self.assertIsNone(result["filter"]["max_median_hours_to_settlement"])
+
+    def test_return_filter_and_sort_are_normalized(self):
+        result = validate_scan_config(
+            {
+                "min_return_efficiency": "0.125",
+                "min_estimated_pnl_per_activity": "2.5",
+                "result_sort": "avg_pnl",
+            },
+            self.base,
+        )
+        self.assertEqual(result["filter"]["min_return_efficiency"], 0.125)
+        self.assertEqual(result["filter"]["min_estimated_pnl_per_activity"], 2.5)
+        self.assertEqual(result["filter"]["result_sort"], "AVG_PNL")
 
     def test_large_candidate_pool_and_chain_controls(self):
         result = validate_scan_config(

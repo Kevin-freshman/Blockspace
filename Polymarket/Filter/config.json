@@ -6,10 +6,13 @@
   },
   "filter": {
     "lookback_hours": 168,
-    "min_trade_count": 10,
+    "min_trade_count": 0,
     "min_trades_per_day": 1.0,
-    "min_median_hours_to_settlement": 0,
-    "max_median_hours_to_settlement": 24
+    "min_return_efficiency": null,
+    "min_estimated_pnl_per_activity": null,
+    "result_sort": "FREQUENCY",
+    "min_median_hours_to_settlement": null,
+    "max_median_hours_to_settlement": null
   },
   "sampling": {
     "activity_page_size": 500,
@@ -18,7 +21,7 @@
     "max_workers": 12
   },
   "chain": {
-    "enabled": true,
+    "enabled": false,
     "rpc_url": "https://polygon.drpc.org",
     "chain_id": 137,
     "receipts_per_address": 8,

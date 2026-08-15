@@ -131,13 +131,31 @@ def build_address_metrics(
         else None
     )
     address = str(leaderboard_entry.get("proxyWallet") or "").lower()
+    leaderboard_pnl = _number(leaderboard_entry.get("pnl"))
+    leaderboard_volume = _number(leaderboard_entry.get("vol"))
+    return_efficiency = (
+        round(leaderboard_pnl / leaderboard_volume, 6)
+        if leaderboard_volume > 0
+        else None
+    )
+    # PNL and activity use the same selected period.  This is an average per
+    # API activity row, not a matched position-level profit.  A capped activity
+    # response cannot provide a defensible denominator, so leave it unknown.
+    estimated_pnl_per_activity = (
+        round(leaderboard_pnl / trade_count, 4)
+        if trade_count > 0 and not truncated
+        else None
+    )
     metrics = {
         "rank": _integer(leaderboard_entry.get("rank")),
         "address": address,
         "user_name": leaderboard_entry.get("userName") or "",
         "verified": bool(leaderboard_entry.get("verifiedBadge")),
-        "leaderboard_pnl": _number(leaderboard_entry.get("pnl")),
-        "leaderboard_volume": _number(leaderboard_entry.get("vol")),
+        "leaderboard_pnl": leaderboard_pnl,
+        "leaderboard_volume": leaderboard_volume,
+        # This is a leaderboard-period efficiency ratio, not capital ROI.
+        "return_efficiency": return_efficiency,
+        "estimated_pnl_per_activity": estimated_pnl_per_activity,
         "trade_count": trade_count,
         "transaction_count": len(transaction_hashes),
         "trades_per_day": round(trade_count / lookback_days, 2),
@@ -180,6 +198,16 @@ def apply_filter(
         reasons.append("trade_count")
     if metrics["trades_per_day"] < filters["min_trades_per_day"]:
         reasons.append("trades_per_day")
+    minimum_efficiency = filters.get("min_return_efficiency")
+    if minimum_efficiency is not None:
+        efficiency = metrics.get("return_efficiency")
+        if efficiency is None or efficiency < minimum_efficiency:
+            reasons.append("return_efficiency")
+    minimum_pnl_per_activity = filters.get("min_estimated_pnl_per_activity")
+    if minimum_pnl_per_activity is not None:
+        pnl_per_activity = metrics.get("estimated_pnl_per_activity")
+        if pnl_per_activity is None or pnl_per_activity < minimum_pnl_per_activity:
+            reasons.append("estimated_pnl_per_activity")
 
     if check_settlement:
         distance = metrics.get("median_hours_to_settlement")

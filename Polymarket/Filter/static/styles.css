@@ -142,9 +142,21 @@ h1 span { color: var(--acid); }
 
 .filter-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  grid-template-columns: repeat(2, minmax(180px, 1fr)) minmax(160px, .7fr);
   gap: 12px;
 }
+
+.advanced-options {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255,255,255,.018);
+}
+.advanced-options summary { color: var(--muted); font-size: 12px; cursor: pointer; }
+.advanced-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }
+.advanced-options > p { margin: 10px 2px 0; color: var(--muted); font-size: 10px; }
 
 label span {
   display: block;
@@ -201,7 +213,7 @@ button:disabled { cursor: wait; opacity: .45; transform: none; }
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
   margin: 12px 0;
 }
@@ -217,6 +229,9 @@ button:disabled { cursor: wait; opacity: .45; transform: none; }
 .stat-card.accent { border-color: rgba(200,255,77,.27); background: linear-gradient(135deg, var(--acid-soft), var(--panel-strong) 58%); }
 .stat-card span, .stat-card small { display: block; color: var(--muted); font-size: 11px; }
 .stat-card strong { display: block; margin: 8px 0 4px; font: 700 34px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: -.05em; }
+
+.metric-note { margin: 4px 2px 14px; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.metric-note strong { color: var(--text); }
 
 .result-panel, .live-panel, .error-panel { margin-top: 12px; overflow: hidden; }
 
@@ -263,6 +278,7 @@ footer p { margin: 0; }
 
 @media (max-width: 1080px) {
   .filter-grid { grid-template-columns: repeat(3, 1fr); }
+  .advanced-grid { grid-template-columns: repeat(3, 1fr); }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
@@ -272,6 +288,7 @@ footer p { margin: 0; }
   .section-heading > p { text-align: left; }
   .status-wrap { width: 100%; }
   .filter-grid { grid-template-columns: 1fr 1fr; }
+  .advanced-grid { grid-template-columns: 1fr; }
   .form-action { grid-column: 1 / -1; }
   .stats-grid { gap: 8px; }
   .stat-card { min-height: 110px; padding: 16px; }
