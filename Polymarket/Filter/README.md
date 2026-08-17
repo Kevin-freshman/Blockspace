@@ -2,11 +2,19 @@
 
 一个只读的 Polymarket 地址筛选网页：从官方 `CRYPTO PNL` 排行榜取得候选地址，找出指定时间内交易频率较高的地址，并提供可选收益筛选、排序、实时观察和数据导出。
 
-> **GitHub 仓库不是在线网页。** 本项目默认运行在远程服务器的 `127.0.0.1:8788`，不会直接暴露到公网。打开网页需要服务器正在运行服务，并在自己的电脑上建立 SSH 隧道。
+> **GitHub 仓库不是在线网页。** 已部署的 Filter 通过 Tailscale Funnel 提供独立的公网
+> HTTPS 地址；服务器内的应用本身仍只监听 `127.0.0.1:8788`。
 
 ## 最快打开网页
 
-### 1. 确认服务器服务正常
+直接打开：
+
+<https://vm-0-6-ubuntu.tail8e1e99.ts.net:8443>
+
+这个地址由 Tailscale Funnel 提供 HTTPS，并转发到服务器内的
+`http://127.0.0.1:8788`。访问者不需要安装 Tailscale 或建立 SSH 隧道。
+
+### 服务检查
 
 SSH 登录服务器后运行：
 
@@ -21,9 +29,9 @@ curl http://127.0.0.1:8788/api/health
 sudo systemctl start polymarket-filter.service
 ```
 
-### 2. 在自己电脑建立 SSH 隧道
+### SSH 隧道备用访问
 
-在自己的电脑上打开一个终端，并保持该终端运行：
+如果公网 Funnel 暂时不可用，可以在自己的电脑上打开一个终端，并保持该终端运行：
 
 ```bash
 ssh -N -L 8788:127.0.0.1:8788 Blockspace
@@ -35,9 +43,7 @@ ssh -N -L 8788:127.0.0.1:8788 Blockspace
 ssh -N -L 8788:127.0.0.1:8788 ubuntu@你的服务器地址
 ```
 
-### 3. 浏览器访问
-
-打开 <http://127.0.0.1:8788>。
+然后打开 <http://127.0.0.1:8788>。
 
 这里的 `127.0.0.1` 指你自己的电脑，SSH 会把请求安全转发到远程服务器。
 
@@ -108,8 +114,11 @@ Polymarket 官方排行榜只提供 PNL 或成交量排序，不提供全站按�
 
 1. 服务器上的服务是否为 `active (running)`。
 2. 服务器上 `curl http://127.0.0.1:8788/api/health` 是否成功。
-3. 自己电脑上的 SSH 隧道终端是否仍在运行。
-4. 浏览器访问的是否是 `http://127.0.0.1:8788`，而不是 GitHub 文件地址或服务器公网 IP。
+3. `tailscale funnel status` 是否仍将公网 `:8443` 转发到 `127.0.0.1:8788`。
+4. 浏览器访问的是否是
+   `https://vm-0-6-ubuntu.tail8e1e99.ts.net:8443`，而不是 GitHub 文件地址。
+5. 若使用备用 SSH 方式，确认隧道终端仍在运行，再访问
+   `http://127.0.0.1:8788`。
 
 ### 本地端口 8788 已被占用
 
@@ -150,7 +159,8 @@ sudo systemctl restart polymarket-filter.service
 sudo journalctl -u polymarket-filter.service -n 100 --no-pager
 ```
 
-项目默认只监听 `127.0.0.1:8788`，这是有意的安全设置。不要为了省略 SSH 隧道直接暴露到公网，除非已经配置反向代理、HTTPS 和访问控制。
+应用默认只监听 `127.0.0.1:8788`，这是有意的安全设置。公网访问由 Tailscale Funnel
+终止 HTTPS 并转发；不要把 Python 服务改成直接监听公网网卡。
 
 ## 本地开发与测试
 
