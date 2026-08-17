@@ -1,108 +1,193 @@
 # Polymarket Crypto Filter
 
-一个轻量、只读的 Polymarket 地址筛选器：从官方 `CRYPTO` PNL 排行榜取得固定候选池，
-按交易频率和可选收益效率筛选、排序，持续轮询通过筛选的地址，并导出 CSV/JSON。
+一个只读的 Polymarket 地址筛选网页：从官方 `CRYPTO PNL` 排行榜取得候选地址，找出指定时间内交易频率较高的地址，并提供可选收益筛选、排序、实时观察和数据导出。
 
-## 数据流
+> **GitHub 仓库不是在线网页。** 本项目默认运行在远程服务器的 `127.0.0.1:8788`，不会直接暴露到公网。打开网页需要服务器正在运行服务，并在自己的电脑上建立 SSH 隧道。
 
-```text
-同周期 CRYPTO PNL 排行榜前 200 名（每页 50 条）
-    │
-    ├─ Data API /activity ── 交易频率
-    ├─ 榜单 PNL / 成交量 ── 收益效率
-    └─ Filter / sort ── /activity 实时轮询
-                       ├─ /positions 持仓摘要
-                       └─ CSV / JSON 导出
+## 最快打开网页
+
+### 1. 确认服务器服务正常
+
+SSH 登录服务器后运行：
+
+```bash
+sudo systemctl status polymarket-filter.service
+curl http://127.0.0.1:8788/api/health
 ```
 
-数据来自公开、免鉴权的 Polymarket API。项目不连接钱包、不读取密钥，也不包含下单、
-签名或任何写链功能。代码仍支持只读 Polygon 回执验证，但默认关闭且不作为筛选条件。
+看到 `active (running)`，并且健康接口返回 `"ok": true`，说明服务正常。如果服务没有运行：
 
-## 筛选口径
+```bash
+sudo systemctl start polymarket-filter.service
+```
 
-- **候选池**：所选周期内官方 `CRYPTO` PNL 榜前 200 名。它不是全站按交易频率选出的
-  前 200 名；官方榜单不支持按频率排序，频率只在这 200 个候选内计算和排序。200 是
-  控制请求量与扫描耗时的默认上限，不是统计抽样结论。
-- **交易记录数**：回看窗口内 `/activity?type=TRADE` 返回的交易记录数。一次链上交易
-  可能对应多条 fill，因此页面同时显示去重后的交易哈希数。
-- **交易频率**：`窗口内交易记录数 / 回看窗口天数`。
-- **总收益效率**：`官方榜单区间 PNL / 同期成交量`。它是横向比较指标，不是基于投入
-  本金的严格 ROI。可作为可选最低阈值，也可用于结果排序。
-- **平均每条成交 PNL（估算）**：`官方榜单区间 PNL / 同期成交记录数`。它可选筛选、
-  排序，但不是配对后的单笔收益；活动达到读取上限时不计算。
-- **单笔真实收益率**：暂不展示。公开活动行不足以可靠配对开仓、部分平仓、剩余成本
-  和最终结算；在缺少完整成本账本时给出单笔 ROI 会产生误导。
+### 2. 在自己电脑建立 SSH 隧道
 
-高频地址默认最多读取 2 页、每页 500 条活动。如果达到上限，结果会标记 `capped`，
-提示交易记录数和频率是下限。
+在自己的电脑上打开一个终端，并保持该终端运行：
 
-## 运行
+```bash
+ssh -N -L 8788:127.0.0.1:8788 Blockspace
+```
 
-服务器已有 Python 3.8 和 `requests` 时无需安装额外依赖：
+`Blockspace` 是 SSH 配置中的服务器别名。如果没有配置别名，改成实际登录地址：
+
+```bash
+ssh -N -L 8788:127.0.0.1:8788 ubuntu@你的服务器地址
+```
+
+### 3. 浏览器访问
+
+打开 <http://127.0.0.1:8788>。
+
+这里的 `127.0.0.1` 指你自己的电脑，SSH 会把请求安全转发到远程服务器。
+
+## 网页怎么用
+
+### 基础筛选
+
+页面默认只有两个必要字段：
+
+1. **分析时间范围**：可选最近 24 小时、7 天或 30 天。排行榜周期和交易回看窗口使用同一时间范围。
+2. **最低交易频率**：单位是“成交记录/天”。例如选择 7 天并填写 `5`，表示只保留最近 7 天平均每天至少有 5 条成交记录的候选地址。
+
+点击 **运行筛选** 后等待进度完成。系统需要读取最多 200 个地址的公开活动记录，状态变为“实时观察中”后即完成。
+
+### 收益筛选与排序（可选）
+
+展开该区域后可以设置：
+
+- **最低总收益效率**：`同期排行榜 PNL ÷ 同期成交量`，输入单位为百分比。例如 `5` 表示至少 `5%`。
+- **最低平均每条成交 PNL**：`同期排行榜 PNL ÷ 同期成交记录数`，单位为 USD。
+- **结果排序**：按交易频率、总收益效率、平均每条成交 PNL 或区间 PNL 从高到低排序。
+
+这些选项默认不限制结果。若只想筛选高频地址，不需要展开或填写。
+
+### 查看与导出结果
+
+- **排行榜候选**：本次从官方榜单实际读到的地址数。
+- **通过筛选**：满足条件、正在实时观察的地址数。
+- **实时交易**：页面当前保留的成交活动数。
+- 点击地址可打开对应的 Polymarket profile。
+- 页面下方的实时活动会自动刷新。
+
+导出入口：
+
+- **地址 CSV**：通过筛选的地址和指标。
+- **交易 CSV**：当前保留的实时成交活动。
+- **完整 JSON**：配置、候选、结果、进度、错误和实时活动的完整快照。
+
+## “候选地址 200”是怎么选的
+
+```text
+所选时间范围内的官方 CRYPTO PNL 排行榜
+    → 按 PNL 取前 200 个地址
+    → 分别读取这 200 个地址的成交活动
+    → 计算交易频率
+    → 按页面条件筛选和排序
+```
+
+Polymarket 官方排行榜只提供 PNL 或成交量排序，不提供全站按交易频率排序。`200` 是为了限制 API 请求量和扫描耗时设置的候选池上限，不是统计抽样结论。
+
+因此，结果是“CRYPTO PNL 榜前 200 名中的高频地址”，不是“Polymarket 全站最高频地址”，也可能遗漏榜外高频地址。
+
+## 指标口径
+
+- **成交记录数**：回看窗口内 `/activity?type=TRADE` 返回的记录数。一次链上交易可能对应多条 fill，所以页面也显示去重后的交易哈希数。
+- **交易频率**：`窗口内成交记录数 ÷ 窗口天数`。
+- **总收益效率**：`官方排行榜同期 PNL ÷ 同期成交量`。适合横向比较，但不是基于投入本金计算的严格 ROI。
+- **平均每条成交 PNL（估算）**：`官方排行榜同期 PNL ÷ 同期成交记录数`。它不是完整配对开仓和平仓后得到的单笔真实收益。
+- **单笔真实收益率**：暂不提供。公开活动数据无法可靠处理历史持仓成本、部分平仓、剩余仓位和最终结算，强行计算会产生误导。
+
+每个高频地址最多读取 2 页、每页 500 条活动。若达到上限，页面会标记 `capped`：成交记录数和频率只是下限，平均每条成交 PNL 会显示为未知。
+
+## 常见问题
+
+### 浏览器显示“无法访问此网站”或 `ERR_CONNECTION_REFUSED`
+
+依次检查：
+
+1. 服务器上的服务是否为 `active (running)`。
+2. 服务器上 `curl http://127.0.0.1:8788/api/health` 是否成功。
+3. 自己电脑上的 SSH 隧道终端是否仍在运行。
+4. 浏览器访问的是否是 `http://127.0.0.1:8788`，而不是 GitHub 文件地址或服务器公网 IP。
+
+### 本地端口 8788 已被占用
+
+换一个本地端口，远端端口仍保持 8788：
+
+```bash
+ssh -N -L 18788:127.0.0.1:8788 Blockspace
+```
+
+然后打开 <http://127.0.0.1:18788>。
+
+### 点击运行筛选后等待较久
+
+系统需要读取最多 200 个地址的公开活动记录。部分 API 请求失败时，页面底部会显示诊断信息；单个地址失败不会中断整个扫描。
+
+### 没有地址通过筛选
+
+先降低“最低交易频率”，并确认可选收益阈值为空。`capped` 地址的频率是下限，但仍可通过频率筛选；缺少可靠分母的地址不会通过“平均每条成交 PNL”筛选。
+
+## 服务器安装与维护
+
+首次安装 systemd 服务：
+
+```bash
+cd /home/ubuntu/kevin/Blockspace/Polymarket/Filter
+sudo install -o root -g root -m 0644 \
+  deploy/polymarket-filter.service \
+  /etc/systemd/system/polymarket-filter.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now polymarket-filter.service
+```
+
+常用命令：
+
+```bash
+sudo systemctl status polymarket-filter.service
+sudo systemctl restart polymarket-filter.service
+sudo journalctl -u polymarket-filter.service -n 100 --no-pager
+```
+
+项目默认只监听 `127.0.0.1:8788`，这是有意的安全设置。不要为了省略 SSH 隧道直接暴露到公网，除非已经配置反向代理、HTTPS 和访问控制。
+
+## 本地开发与测试
+
+服务器已有 Python 3.8 和 `requests` 时无需安装其他依赖：
 
 ```bash
 cd /home/ubuntu/kevin/Blockspace/Polymarket/Filter
 python3 app.py
 ```
 
-默认仅监听 `127.0.0.1:8788`。在本机新开一个终端建立 SSH 隧道：
-
-```powershell
-ssh -L 8788:127.0.0.1:8788 Blockspace
-```
-
-然后访问 `http://127.0.0.1:8788`。
-
-如需临时监听所有网卡，必须先确认服务器防火墙和访问控制：
-
-```bash
-python3 app.py --host 0.0.0.0 --port 8788
-```
-
-## 测试
-
-普通测试完全离线：
+离线测试：
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-启动服务后可以做本机健康检查：
+网页只在点击“运行筛选”时发起有边界的真实 Polymarket API 请求。项目不连接钱包、不读取密钥，也不包含下单、签名或任何写链功能。
 
-```bash
-curl http://127.0.0.1:8788/api/health
-```
-
-网页点击“运行筛选”才会发起有边界的真实 API 请求。
-
-## 目录
+## 项目结构
 
 ```text
 Filter/
   app.py                 # 标准库 HTTP 服务
   service.py             # 扫描、实时轮询、缓存与导出
-  polymarket_client.py   # 公开 API 客户端与重试
-  polygon_client.py      # Polygon 主网只读 JSON-RPC 客户端
-  filter_engine.py       # 纯筛选/统计逻辑
+  polymarket_client.py   # Polymarket 公开 API 客户端
+  polygon_client.py      # 可选的 Polygon 只读回执客户端
+  filter_engine.py       # 纯筛选与统计逻辑
   config.json            # 默认参数
   static/                # 无框架网页
   tests/                 # 离线单元测试
-  deploy/                # 可选 systemd unit
-  data/                  # 运行时缓存/快照，已 gitignore
+  deploy/                # systemd unit
+  data/                  # 运行时缓存和快照，不提交、不对外提供
 ```
 
-## 导出
+## 数据来源
 
-- `/api/export/addresses.csv`：通过筛选的地址与指标
-- `/api/export/trades.csv`：当前保留的实时交易记录
-- `/api/export/snapshot.json`：筛选配置、地址、交易、进度与错误的完整快照
-
-## 官方接口
-
-- 排行榜：<https://docs.polymarket.com/api-reference/core/get-trader-leaderboard-rankings>
-- 用户活动：<https://docs.polymarket.com/api-reference/core/get-user-activity>
-- 当前持仓：<https://docs.polymarket.com/api-reference/core/get-current-positions-for-a-user>
-- CLOB 市场：<https://docs.polymarket.com/api-reference/markets/get-market-by-id>
-- 速率限制：<https://docs.polymarket.com/api-reference/rate-limits>
-- Polymarket 合约地址：<https://docs.polymarket.com/resources/contracts>
-- Polygon PoS RPC：<https://docs.polygon.technology/pos/reference/rpc-endpoints>
+- [Polymarket 排行榜](https://docs.polymarket.com/api-reference/core/get-trader-leaderboard-rankings)
+- [用户活动](https://docs.polymarket.com/api-reference/core/get-user-activity)
+- [当前持仓](https://docs.polymarket.com/api-reference/core/get-current-positions-for-a-user)
+- [速率限制](https://docs.polymarket.com/api-reference/rate-limits)
