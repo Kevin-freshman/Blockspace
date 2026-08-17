@@ -11,9 +11,11 @@ from filter_engine import (  # noqa: E402
     apply_filter,
     build_address_metrics,
     enrich_trade_onchain,
+    infer_interval_end_timestamp,
     normalize_trade,
     summarize_chain_receipts,
     summarize_positions,
+    summarize_tail_analysis,
     trade_key,
 )
 from polygon_client import normalize_receipt  # noqa: E402
@@ -34,6 +36,7 @@ class FilterEngineTests(unittest.TestCase):
             self._trade(now - 1200, CONDITION_B, "0x" + "2" * 64),
             self._trade(now - 100_000, CONDITION_A, "0x" + "3" * 64),
         ]
+        trades[0]["price"] = 0.95
         markets = {
             CONDITION_A: {"end_timestamp": now - 600 + 3600},
             CONDITION_B: {"end_timestamp": now - 1200 + 7200},
@@ -58,7 +61,39 @@ class FilterEngineTests(unittest.TestCase):
         self.assertEqual(metrics["estimated_pnl_per_activity"], 6.0)
         self.assertEqual(metrics["median_hours_to_settlement"], 1.5)
         self.assertEqual(metrics["settlement_coverage"], 1.0)
+        self.assertEqual(metrics["tail_60m_trade_count"], 1)
+        self.assertEqual(metrics["tail_6h_trade_count"], 2)
+        self.assertEqual(metrics["tail_60m_high_confidence_count"], 1)
+        self.assertEqual(metrics["tail_60m_buy_count"], 1)
         self.assertEqual(len(normalized), 2)
+
+    def test_tail_analysis_summary_uses_only_scoped_addresses(self):
+        summary = summarize_tail_analysis(
+            [
+                {
+                    "tail_analysis_in_scope": True,
+                    "activity_truncated": True,
+                    "trade_count": 10,
+                    "settlement_trade_count": 8,
+                    "tail_60m_trade_count": 2,
+                    "tail_60m_high_confidence_count": 1,
+                    "tail_60m_usdc_volume": 25,
+                },
+                {
+                    "tail_analysis_in_scope": False,
+                    "trade_count": 99,
+                    "settlement_trade_count": 99,
+                    "tail_60m_trade_count": 99,
+                },
+            ],
+            sample_limit=100,
+            market_cap_per_address=12,
+        )
+        self.assertEqual(summary["sampled_addresses"], 1)
+        self.assertEqual(summary["tail_trade_count"], 2)
+        self.assertEqual(summary["tail_trade_share"], 0.25)
+        self.assertEqual(summary["settlement_coverage"], 0.8)
+        self.assertEqual(summary["capped_addresses"], 1)
 
     def test_filter_requires_known_distance_when_distance_is_enabled(self):
         base = {
@@ -159,6 +194,17 @@ class FilterEngineTests(unittest.TestCase):
         trade = self._trade(1000, CONDITION_A, "0x" + "1" * 64)
         row = normalize_trade(trade, {"end_timestamp": 700})
         self.assertEqual(row["minutes_to_settlement"], -5.0)
+
+    def test_interval_slug_provides_precise_end_time(self):
+        trade = self._trade(1_700_000_240, CONDITION_A, "0x" + "1" * 64)
+        trade["eventSlug"] = "btc-updown-5m-1700000000"
+        row = normalize_trade(
+            trade,
+            {"end_date_iso": "2023-11-14T00:00:00Z"},
+        )
+        self.assertEqual(infer_interval_end_timestamp(trade), 1_700_000_300)
+        self.assertEqual(row["minutes_to_settlement"], 1.0)
+        self.assertEqual(row["settlement_time_source"], "slug_interval")
 
     def test_position_summary(self):
         result = summarize_positions(
@@ -315,6 +361,27 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(len(rows), 125)
         self.assertEqual([call["offset"] for call in client.calls], [0, 50, 100])
         self.assertEqual([call["limit"] for call in client.calls], [50, 50, 25])
+
+    def test_leaderboard_can_scan_one_thousand_candidates(self):
+        class FakeClient(PolymarketClient):
+            def __init__(self):
+                self.calls = []
+
+            def _get(self, _url, params):
+                self.calls.append(dict(params))
+                return [
+                    {
+                        "rank": str(index + 1),
+                        "proxyWallet": "0x%040x" % (index + 1),
+                    }
+                    for index in range(params["offset"], params["offset"] + params["limit"])
+                ]
+
+        client = FakeClient()
+        rows = client.leaderboard("WEEK", "PNL", 1000)
+        self.assertEqual(len(rows), 1000)
+        self.assertEqual(len(client.calls), 20)
+        self.assertEqual(client.calls[-1]["offset"], 950)
 
     def test_polygon_receipt_normalization(self):
         transaction_hash = "0x" + "1" * 64

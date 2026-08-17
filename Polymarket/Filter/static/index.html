@@ -15,7 +15,7 @@
       <div>
         <p class="eyebrow">BLOCKSPACE · READ-ONLY SIGNAL LAYER</p>
         <h1>Polymarket <span>Crypto Filter</span></h1>
-        <p class="subtitle">从公开榜单候选池中找出交易活跃、收益效率可选达标的地址。</p>
+        <p class="subtitle">扫描更大的公开榜单候选池，并用真实活动记录研究高频与尾盘交易行为。</p>
       </div>
       <div class="status-wrap">
         <span id="statusDot" class="status-dot idle"></span>
@@ -32,7 +32,7 @@
         <p class="section-kicker">01 · SCREEN</p>
           <h2>高频地址筛选</h2>
         </div>
-        <p><strong>200 个候选怎么来：</strong>在相同时间范围内，先取 Polymarket 官方 CRYPTO PNL 榜前 200 名，再逐个计算交易频率。官方榜单不提供“按频率排序”，200 只是控制扫描耗时的上限；所以这不是全站高频前 200，也可能遗漏榜外高频地址。</p>
+        <p><strong>候选池已扩至 1,000：</strong>在相同时间范围内读取官方 CRYPTO PNL 榜前 1,000 名，再逐个计算交易频率。官方榜单不提供全站频率排序，所以结果仍是“榜单候选中的高频地址”，不是全站高频榜。</p>
       </div>
       <form id="filterForm" class="filter-grid">
         <label>
@@ -88,12 +88,12 @@
       <article class="stat-card">
         <span>排行榜候选</span>
         <strong id="candidateCount">—</strong>
-        <small>CRYPTO addresses</small>
+        <small>最多 1,000 · PNL 榜候选</small>
       </article>
       <article class="stat-card accent">
         <span>通过筛选</span>
         <strong id="filteredCount">—</strong>
-        <small>live tracking</small>
+        <small>完整结果 · 前 100 实时跟踪</small>
       </article>
       <article class="stat-card">
         <span>实时交易</span>
@@ -139,10 +139,102 @@
       </div>
     </section>
 
+    <section class="panel strategy-panel">
+      <div class="section-heading compact">
+        <div>
+          <p class="section-kicker">03 · TAIL-END STUDY</p>
+          <h2>扫尾盘策略研究教室</h2>
+        </div>
+        <p>这里分析历史行为与数据质量，不提供自动跟单、下单或收益承诺。</p>
+      </div>
+
+      <div class="strategy-intro">
+        <div>
+          <span class="concept-label">WHAT</span>
+          <h3>什么是“扫尾盘”</h3>
+          <p>在预测市场语境中，通常指市场临近计划结束、结果看似高度确定时，买入高概率结果，尝试赚取成交价到最终兑付值之间的小价差。例如以 0.97 买入最终兑付 1 的合约，理论毛空间是 0.03；但一旦判断错误，损失可能接近 0.97。</p>
+        </div>
+        <div class="risk-callout">
+          <strong>它不是“低风险捡钱”</strong>
+          <p>尾盘信息不对称、规则解释、延迟结算、突发反转、价差、滑点和流动性都会让“小赚大亏”的收益分布恶化。高胜率不等于正期望。</p>
+        </div>
+      </div>
+
+      <div class="tail-summary-grid" aria-label="尾盘研究摘要">
+        <article><span>纳入尾盘详析</span><strong id="tailSampledAddresses">—</strong><small>排序靠前地址</small></article>
+        <article><span>结束前 60 分钟成交</span><strong id="tailTradeCount">—</strong><small id="tailTradeShare">占已知样本 —</small></article>
+        <article><span>有尾盘行为的地址</span><strong id="tailActiveAddresses">—</strong><small>至少 1 条记录</small></article>
+        <article><span>高价尾盘 BUY</span><strong id="tailHighConfidence">—</strong><small>成交价 ≥ 0.90</small></article>
+      </div>
+
+      <div class="analysis-walkthrough">
+        <h3>用本次筛选结果一步一步分析</h3>
+        <ol>
+          <li>
+            <span class="step-index">1</span>
+            <div><strong>先确定研究总体，不急着看收益</strong><p id="tailStepScope">运行筛选后，这里会显示本次候选池、通过筛选数和尾盘详析样本。</p></div>
+          </li>
+          <li>
+            <span class="step-index">2</span>
+            <div><strong>检查结束时间数据覆盖率</strong><p id="tailStepCoverage">只有能取得市场计划结束时间的成交，才能判断它是否属于尾盘。覆盖率不足时不能外推。</p></div>
+          </li>
+          <li>
+            <span class="step-index">3</span>
+            <div><strong>识别是否存在稳定的尾盘行为</strong><p id="tailStepPattern">比较 60 分钟成交数、在已知时间成交中的占比、涉及市场数，以及 6 小时和 24 小时窗口。</p></div>
+          </li>
+          <li>
+            <span class="step-index">4</span>
+            <div><strong>拆解价格与方向，而不是只看胜率</strong><p id="tailStepPrice">高价买入的最大毛收益很小、错误损失很大；同时检查 BUY/SELL、平均价格和价格 ≥0.90 的 BUY 数。</p></div>
+          </li>
+          <li>
+            <span class="step-index">5</span>
+            <div><strong>做跨市场、跨时间的样本外验证</strong><p>本页只能识别行为模式，不能证明策略盈利。下一步应导出快照，等待市场结算后按成交价、实际结果、费用和滑点重算，并把建模期与验证期分开。</p></div>
+          </li>
+        </ol>
+      </div>
+
+      <div class="tail-table-heading">
+        <div>
+          <h3>尾盘行为候选</h3>
+          <p>按结束前 60 分钟成交数排序；仅展示本次有结束时间采样的地址。</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="tail-table">
+          <thead>
+            <tr>
+              <th>地址</th>
+              <th>60 分钟 / 占比</th>
+              <th>6 小时 / 24 小时</th>
+              <th>均价 / ≥0.90</th>
+              <th>BUY / SELL</th>
+              <th>时间数据覆盖</th>
+            </tr>
+          </thead>
+          <tbody id="tailRows">
+            <tr><td colspan="6" class="empty">运行筛选后生成尾盘行为候选。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="research-notes">
+        <h3>参考资料与延伸阅读</h3>
+        <div class="source-grid">
+          <a href="https://docs.polymarket.com/api-reference/core/get-trader-leaderboard-rankings" target="_blank" rel="noreferrer"><strong>Polymarket 排行榜 API</strong><span>候选池与分页边界的官方口径 ↗</span></a>
+          <a href="https://docs.polymarket.com/api-reference/core/get-user-activity" target="_blank" rel="noreferrer"><strong>Polymarket 用户活动 API</strong><span>成交时间、价格、方向等字段来源 ↗</span></a>
+          <a href="https://doi.org/10.1111/j.1468-0297.2012.02561.x" target="_blank" rel="noreferrer"><strong>Page &amp; Clemen (2013)</strong><span>预测市场校准、到期时间与 favorite–longshot bias ↗</span></a>
+          <a href="https://www.aeaweb.org/articles?id=10.1257/0895330041371321" target="_blank" rel="noreferrer"><strong>Wolfers &amp; Zitzewitz (2004)</strong><span>预测市场的信息聚合与价格解释基础 ↗</span></a>
+          <a href="https://arxiv.org/abs/2606.07811" target="_blank" rel="noreferrer"><strong>Angelini &amp; De Angelis (2026)</strong><span>实时公开信息、流动性与渐进价格发现；预印本 ↗</span></a>
+          <a href="https://arxiv.org/abs/2607.08199" target="_blank" rel="noreferrer"><strong>Xi et al. (2026)</strong><span>二元预测市场临近到期的波动结构；预印本 ↗</span></a>
+        </div>
+      </div>
+      <p class="method-warning"><strong>方法边界：</strong>短周期 Crypto 市场用 slug 中的 Unix 起点和 5m/15m 等周期推导计划结束时间，其他市场使用官方结束字段；两者都不一定等于实际判定或兑付时刻。每个样本地址只补齐最近 12 个不同市场，结果是行为筛查，不是完整业绩回测。</p>
+    </section>
+
     <section class="panel live-panel">
       <div class="section-heading compact">
         <div>
-          <p class="section-kicker live-kicker"><span></span>03 · LIVE FEED</p>
+          <p class="section-kicker live-kicker"><span></span>04 · LIVE FEED</p>
           <h2>地址实时活动</h2>
         </div>
         <div class="export-row">
@@ -164,7 +256,7 @@
             </tr>
           </thead>
           <tbody id="tradeRows">
-            <tr><td colspan="8" class="empty">通过筛选的地址会自动进入轮询。</td></tr>
+            <tr><td colspan="8" class="empty">通过筛选后，排序靠前的 100 个地址会自动进入轮询。</td></tr>
           </tbody>
         </table>
       </div>

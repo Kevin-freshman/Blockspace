@@ -19,9 +19,11 @@ from filter_engine import (
     apply_filter,
     build_address_metrics,
     enrich_trade_onchain,
+    infer_interval_end_timestamp,
     normalize_trade,
     summarize_chain_receipts,
     summarize_positions,
+    summarize_tail_analysis,
     trade_key,
     utc_iso,
 )
@@ -168,6 +170,7 @@ class FilterService:
             "progress": {"stage": "idle", "completed": 0, "total": 0, "message": ""},
             "addresses": [],
             "filtered_addresses": [],
+            "tail_analysis": {},
             "live_trades": [],
             "last_scan_at": None,
             "last_live_at": None,
@@ -214,6 +217,7 @@ class FilterService:
                     },
                     "addresses": [],
                     "filtered_addresses": [],
+                    "tail_analysis": {},
                     "live_trades": [],
                     "errors": [],
                 }
@@ -238,11 +242,24 @@ class FilterService:
             "leaderboard_volume",
             "return_efficiency",
             "estimated_pnl_per_activity",
+            "tail_analysis_in_scope",
+            "tail_60m_trade_count",
+            "tail_6h_trade_count",
+            "tail_24h_trade_count",
+            "tail_60m_share",
+            "tail_60m_buy_count",
+            "tail_60m_sell_count",
+            "tail_60m_high_confidence_count",
+            "tail_60m_avg_price",
+            "tail_60m_usdc_volume",
+            "tail_60m_market_count",
             "trade_count",
             "transaction_count",
             "trades_per_day",
             "median_hours_to_settlement",
             "settlement_coverage",
+            "settlement_slug_inferred_count",
+            "settlement_market_end_count",
             "activity_truncated",
             "open_position_count",
             "open_position_value",
@@ -346,7 +363,7 @@ class FilterService:
             # Stage one is intentionally cheap: use count and frequency before
             # performing market metadata or on-chain lookups.
             preliminary = []
-            shortlisted_entries = []
+            preliminary_by_address: Dict[str, Dict[str, Any]] = {}
             for entry in leaderboard:
                 address = str(entry.get("proxyWallet") or "").lower()
                 rows, truncated = activities.get(address, ([], False))
@@ -362,21 +379,49 @@ class FilterService:
                     metrics, config["filter"], check_settlement=False
                 )
                 preliminary.append(metrics)
-                if metrics["passes"]:
-                    shortlisted_entries.append(entry)
-
-            settlement_filter_enabled = any(
-                config["filter"].get(name) is not None
-                for name in (
-                    "min_median_hours_to_settlement",
-                    "max_median_hours_to_settlement",
+                preliminary_by_address[address] = metrics
+            sort_field = {
+                "FREQUENCY": "trades_per_day",
+                "RETURN": "return_efficiency",
+                "AVG_PNL": "estimated_pnl_per_activity",
+                "PNL": "leaderboard_pnl",
+            }[config["filter"].get("result_sort", "FREQUENCY")]
+            preliminary_filtered = [
+                item for item in preliminary if item["passes"]
+            ]
+            preliminary_filtered.sort(
+                key=lambda item: _descending_metric_key(item, sort_field),
+                reverse=True,
+            )
+            tail_limit = config["sampling"]["tail_analysis_addresses"]
+            tail_sample_addresses = {
+                item["address"] for item in preliminary_filtered[:tail_limit]
+            }
+            entry_by_address = {
+                str(entry.get("proxyWallet") or "").lower(): entry
+                for entry in leaderboard
+            }
+            tail_sample_entries = [
+                entry_by_address[address]
+                for address in (
+                    item["address"] for item in preliminary_filtered[:tail_limit]
                 )
+                if address in entry_by_address
+            ]
+            market_ids = self._market_sample_ids(
+                tail_sample_entries, activities, config
             )
-            market_ids = (
-                self._market_sample_ids(shortlisted_entries, activities, config)
-                if settlement_filter_enabled
-                else []
-            )
+            # The expanded scan can contain up to a million activity rows.
+            # Once the detailed sample is known, discard raw rows outside it;
+            # their already-computed metrics are sufficient for the full
+            # filter result. Chain mode retains all rows because it is an
+            # explicit, opt-in per-transaction verification path.
+            if not config["chain"].get("enabled", True):
+                activities = {
+                    address: value
+                    for address, value in activities.items()
+                    if address in tail_sample_addresses
+                }
             missing_ids = [cid for cid in market_ids if cid not in self.market_cache]
             self._set_progress(
                 scan_id,
@@ -392,19 +437,29 @@ class FilterService:
             normalized_by_address: Dict[str, List[Dict[str, Any]]] = {}
             for entry in leaderboard:
                 address = str(entry.get("proxyWallet") or "").lower()
-                rows, truncated = activities.get(address, ([], False))
-                metrics, normalized = build_address_metrics(
-                    entry,
-                    rows,
-                    self.market_cache,
-                    config["filter"]["lookback_hours"],
-                    now_timestamp,
-                    truncated,
-                )
-                metrics = apply_filter(metrics, config["filter"])
+                if address in activities:
+                    rows, truncated = activities[address]
+                    metrics, normalized = build_address_metrics(
+                        entry,
+                        rows,
+                        self.market_cache,
+                        config["filter"]["lookback_hours"],
+                        now_timestamp,
+                        truncated,
+                    )
+                    metrics = apply_filter(metrics, config["filter"])
+                else:
+                    metrics = apply_filter(
+                        preliminary_by_address[address],
+                        config["filter"],
+                        check_settlement=False,
+                    )
+                    normalized = []
+                metrics["tail_analysis_in_scope"] = address in tail_sample_addresses
                 if address in activity_errors:
                     metrics["error"] = activity_errors[address]
-                normalized_by_address[address] = normalized
+                if normalized:
+                    normalized_by_address[address] = normalized
                 addresses.append(metrics)
             addresses.sort(key=lambda item: item.get("rank") or 10 ** 9)
             offchain_filtered = [item for item in addresses if item["passes"]]
@@ -437,33 +492,25 @@ class FilterService:
                     chain_map.get(item["address"], item) for item in addresses
                 ]
             filtered = [item for item in addresses if item["passes"]]
-            sort_field = {
-                "FREQUENCY": "trades_per_day",
-                "RETURN": "return_efficiency",
-                "AVG_PNL": "estimated_pnl_per_activity",
-                "PNL": "leaderboard_pnl",
-            }[config["filter"].get("result_sort", "FREQUENCY")]
             filtered.sort(
-                key=lambda item: (
-                    item.get(sort_field) is not None,
-                    (
-                        item.get(sort_field)
-                        if item.get(sort_field) is not None
-                        else float("-inf")
-                    ),
-                ),
+                key=lambda item: _descending_metric_key(item, sort_field),
                 reverse=True,
             )
+            tracked_limit = config["live"]["max_tracked_addresses"]
+            for index, item in enumerate(filtered):
+                item["live_tracked"] = index < tracked_limit
 
+            detail_limit = config["sampling"]["detail_addresses"]
+            detailed_addresses = filtered[:detail_limit]
             self._set_progress(
                 scan_id,
                 "positions",
                 0,
-                len(filtered),
+                len(detailed_addresses),
                 "正在读取筛选地址的当前持仓",
             )
             position_errors = self._attach_positions(
-                scan_id, filtered, sampling["max_workers"]
+                scan_id, detailed_addresses, sampling["max_workers"]
             )
             filtered_map = {item["address"]: item for item in filtered}
             addresses = [filtered_map.get(item["address"], item) for item in addresses]
@@ -471,7 +518,10 @@ class FilterService:
             live_seed: List[Dict[str, Any]] = []
             names = {item["address"]: item.get("user_name") or "" for item in filtered}
             contracts = config["chain"]["polymarket_contracts"]
-            for address in filtered_map:
+            tracked_addresses = {
+                item["address"] for item in filtered if item.get("live_tracked")
+            }
+            for address in tracked_addresses:
                 for trade in normalized_by_address.get(address, []):
                     transaction_hash = str(
                         trade.get("transaction_hash") or ""
@@ -503,6 +553,11 @@ class FilterService:
                         "status": "ready",
                         "addresses": addresses,
                         "filtered_addresses": filtered,
+                        "tail_analysis": summarize_tail_analysis(
+                            filtered,
+                            config["sampling"]["tail_analysis_addresses"],
+                            config["sampling"]["settlement_markets_per_address"],
+                        ),
                         "live_trades": live_seed,
                         "last_scan_at": utc_iso(finished),
                         "last_live_at": utc_iso(finished),
@@ -552,6 +607,8 @@ class FilterService:
             )
             seen = set()
             for row in rows:
+                if infer_interval_end_timestamp(row) is not None:
+                    continue
                 condition_id = str(row.get("conditionId") or "").lower()
                 if not condition_id or condition_id in seen:
                     continue
@@ -712,6 +769,7 @@ class FilterService:
                 scan_id = self.state["scan_id"]
                 addresses = [
                     item["address"] for item in self.state["filtered_addresses"]
+                    if item.get("live_tracked")
                 ]
             if not addresses:
                 continue
@@ -888,6 +946,11 @@ def _bounded_int(value: Any, minimum: int, maximum: int) -> int:
     if result < minimum or result > maximum:
         raise ValueError("integer must be between %d and %d" % (minimum, maximum))
     return result
+
+
+def _descending_metric_key(item: Dict[str, Any], field: str) -> Tuple[bool, float]:
+    value = item.get(field)
+    return value is not None, float(value) if value is not None else float("-inf")
 
 
 def _bounded_float(value: Any, minimum: float, maximum: float) -> float:

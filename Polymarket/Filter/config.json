@@ -2,7 +2,7 @@
   "leaderboard": {
     "time_period": "WEEK",
     "order_by": "PNL",
-    "candidate_limit": 200
+    "candidate_limit": 1000
   },
   "filter": {
     "lookback_hours": 168,
@@ -18,6 +18,8 @@
     "activity_page_size": 500,
     "max_activity_pages": 2,
     "settlement_markets_per_address": 12,
+    "tail_analysis_addresses": 100,
+    "detail_addresses": 100,
     "max_workers": 12
   },
   "chain": {
@@ -42,7 +44,8 @@
     "poll_seconds": 15,
     "activity_limit": 100,
     "positions_refresh_seconds": 60,
-    "max_events": 1000
+    "max_events": 1000,
+    "max_tracked_addresses": 100
   },
   "http": {
     "host": "127.0.0.1",

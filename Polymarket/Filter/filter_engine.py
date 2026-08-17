@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import statistics
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -54,13 +55,16 @@ def normalize_trade(
     condition_id = str(
         trade.get("conditionId") or trade.get("condition_id") or ""
     ).lower()
-    end_timestamp = None
-    if market:
+    end_timestamp = infer_interval_end_timestamp(trade)
+    settlement_time_source = "slug_interval" if end_timestamp is not None else None
+    if end_timestamp is None and market:
         end_timestamp = parse_timestamp(market.get("end_timestamp"))
         if end_timestamp is None:
             end_timestamp = parse_iso_timestamp(
                 market.get("end_date_iso") or market.get("endDate")
             )
+        if end_timestamp is not None:
+            settlement_time_source = "market_end_date"
 
     minutes_to_settlement = None
     if timestamp is not None and end_timestamp is not None:
@@ -83,8 +87,23 @@ def normalize_trade(
         "outcome": trade.get("outcome") or "",
         "minutes_to_settlement": minutes_to_settlement,
         "settlement_time_utc": utc_iso(end_timestamp),
+        "settlement_time_source": settlement_time_source,
     }
     return result
+
+
+def infer_interval_end_timestamp(trade: Dict[str, Any]) -> Optional[int]:
+    """Infer precise end time for slugs like btc-updown-5m-1700000000."""
+    slug = str(trade.get("eventSlug") or trade.get("slug") or "").lower()
+    match = re.search(r"-(\d+)(m|h)-(\d{10})$", slug)
+    if not match:
+        return None
+    amount = int(match.group(1))
+    seconds = amount * (60 if match.group(2) == "m" else 3600)
+    if seconds <= 0 or seconds > 7 * 24 * 3600:
+        return None
+    start_timestamp = parse_timestamp(match.group(3))
+    return start_timestamp + seconds if start_timestamp is not None else None
 
 
 def build_address_metrics(
@@ -116,6 +135,21 @@ def build_address_metrics(
         if item.get("minutes_to_settlement") is not None
         and item["minutes_to_settlement"] >= 0
     ]
+    tail_60m = [
+        item for item in normalized
+        if item.get("minutes_to_settlement") is not None
+        and 0 <= item["minutes_to_settlement"] <= 60
+    ]
+    tail_6h_count = sum(
+        1 for item in normalized
+        if item.get("minutes_to_settlement") is not None
+        and 0 <= item["minutes_to_settlement"] <= 360
+    )
+    tail_24h_count = sum(
+        1 for item in normalized
+        if item.get("minutes_to_settlement") is not None
+        and 0 <= item["minutes_to_settlement"] <= 1440
+    )
     after_scheduled_end = sum(
         1
         for item in normalized
@@ -125,6 +159,18 @@ def build_address_metrics(
     trade_count = len(normalized)
     lookback_days = max(float(lookback_hours) / 24.0, 1.0 / 24.0)
     settlement_count = len(positive_distances)
+    slug_time_count = sum(
+        1 for item in normalized
+        if item.get("minutes_to_settlement") is not None
+        and item["minutes_to_settlement"] >= 0
+        and item.get("settlement_time_source") == "slug_interval"
+    )
+    market_time_count = sum(
+        1 for item in normalized
+        if item.get("minutes_to_settlement") is not None
+        and item["minutes_to_settlement"] >= 0
+        and item.get("settlement_time_source") == "market_end_date"
+    )
     median_minutes = (
         round(float(statistics.median(positive_distances)), 2)
         if positive_distances
@@ -164,9 +210,46 @@ def build_address_metrics(
             round(median_minutes / 60.0, 2) if median_minutes is not None else None
         ),
         "settlement_trade_count": settlement_count,
+        "settlement_slug_inferred_count": slug_time_count,
+        "settlement_market_end_count": market_time_count,
         "settlement_coverage": (
             round(settlement_count / trade_count, 4) if trade_count else 0.0
         ),
+        "tail_60m_trade_count": len(tail_60m),
+        "tail_6h_trade_count": tail_6h_count,
+        "tail_24h_trade_count": tail_24h_count,
+        "tail_60m_share": (
+            round(len(tail_60m) / settlement_count, 4)
+            if settlement_count else None
+        ),
+        "tail_60m_buy_count": sum(
+            1 for item in tail_60m if str(item.get("side") or "").upper() == "BUY"
+        ),
+        "tail_60m_sell_count": sum(
+            1 for item in tail_60m if str(item.get("side") or "").upper() == "SELL"
+        ),
+        "tail_60m_high_confidence_count": sum(
+            1 for item in tail_60m
+            if str(item.get("side") or "").upper() == "BUY"
+            and item.get("price") is not None
+            and float(item["price"]) >= 0.9
+        ),
+        "tail_60m_avg_price": (
+            round(statistics.mean(
+                float(item["price"]) for item in tail_60m
+                if item.get("price") is not None
+            ), 4)
+            if any(item.get("price") is not None for item in tail_60m)
+            else None
+        ),
+        "tail_60m_usdc_volume": round(sum(
+            float(item.get("usdc_size") or 0) for item in tail_60m
+        ), 2),
+        "tail_60m_market_count": len({
+            item.get("condition_id") for item in tail_60m
+            if item.get("condition_id")
+        }),
+        "tail_analysis_in_scope": False,
         "after_scheduled_end_count": after_scheduled_end,
         "latest_trade_at": normalized[0]["timestamp_utc"] if normalized else None,
         "activity_truncated": bool(truncated),
@@ -186,6 +269,52 @@ def build_address_metrics(
         "filter_reasons": [],
     }
     return metrics, normalized
+
+
+def summarize_tail_analysis(
+    addresses: Iterable[Dict[str, Any]],
+    sample_limit: int,
+    market_cap_per_address: int,
+) -> Dict[str, Any]:
+    """Summarize bounded, scheduled-end tail activity for the browser lesson."""
+    scoped = [item for item in addresses if item.get("tail_analysis_in_scope")]
+    known_trades = sum(int(item.get("settlement_trade_count") or 0) for item in scoped)
+    total_trades = sum(int(item.get("trade_count") or 0) for item in scoped)
+    tail_trades = sum(int(item.get("tail_60m_trade_count") or 0) for item in scoped)
+    high_confidence = sum(
+        int(item.get("tail_60m_high_confidence_count") or 0) for item in scoped
+    )
+    return {
+        "window_minutes": 60,
+        "sample_limit": int(sample_limit),
+        "sampled_addresses": len(scoped),
+        "capped_addresses": sum(
+            1 for item in scoped if item.get("activity_truncated")
+        ),
+        "market_cap_per_address": int(market_cap_per_address),
+        "known_trade_count": known_trades,
+        "slug_inferred_trade_count": sum(
+            int(item.get("settlement_slug_inferred_count") or 0) for item in scoped
+        ),
+        "market_end_trade_count": sum(
+            int(item.get("settlement_market_end_count") or 0) for item in scoped
+        ),
+        "total_trade_count": total_trades,
+        "settlement_coverage": (
+            round(known_trades / total_trades, 4) if total_trades else 0.0
+        ),
+        "addresses_with_tail_trades": sum(
+            1 for item in scoped if int(item.get("tail_60m_trade_count") or 0) > 0
+        ),
+        "tail_trade_count": tail_trades,
+        "tail_trade_share": (
+            round(tail_trades / known_trades, 4) if known_trades else None
+        ),
+        "high_confidence_tail_count": high_confidence,
+        "tail_usdc_volume": round(sum(
+            float(item.get("tail_60m_usdc_volume") or 0) for item in scoped
+        ), 2),
+    }
 
 
 def apply_filter(

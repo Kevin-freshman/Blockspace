@@ -234,6 +234,44 @@ button:disabled { cursor: wait; opacity: .45; transform: none; }
 .metric-note strong { color: var(--text); }
 
 .result-panel, .live-panel, .error-panel { margin-top: 12px; overflow: hidden; }
+.strategy-panel { margin-top: 12px; overflow: hidden; }
+.strategy-panel .section-heading > p { max-width: 440px; }
+
+.strategy-intro {
+  display: grid;
+  grid-template-columns: 1.35fr .65fr;
+  gap: 14px;
+  padding: 22px 24px;
+  border-top: 1px solid var(--line);
+}
+.strategy-intro > div { padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.018); }
+.strategy-intro h3, .analysis-walkthrough h3, .tail-table-heading h3, .research-notes h3 { margin: 0 0 9px; font-size: 16px; }
+.strategy-intro p, .analysis-walkthrough p, .tail-table-heading p, .method-warning { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.concept-label { display: block; margin-bottom: 10px; color: var(--acid); font: 700 10px ui-monospace, monospace; letter-spacing: .12em; }
+.risk-callout { border-color: rgba(255,125,119,.22) !important; background: rgba(255,125,119,.035) !important; }
+.risk-callout strong { display: block; margin-bottom: 9px; color: var(--danger); font-size: 13px; }
+
+.tail-summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 0 24px 22px; }
+.tail-summary-grid article { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #111412; }
+.tail-summary-grid span, .tail-summary-grid small { display: block; color: var(--muted); font-size: 10px; }
+.tail-summary-grid strong { display: block; margin: 7px 0 4px; font: 700 25px ui-monospace, monospace; color: var(--acid); }
+
+.analysis-walkthrough { margin: 0 24px 22px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; }
+.analysis-walkthrough ol { display: grid; gap: 13px; margin: 16px 0 0; padding: 0; list-style: none; }
+.analysis-walkthrough li { display: grid; grid-template-columns: 30px 1fr; gap: 12px; align-items: start; }
+.analysis-walkthrough li strong { display: block; margin: 1px 0 3px; font-size: 12px; }
+.step-index { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid rgba(200,255,77,.3); border-radius: 8px; color: var(--acid); font: 700 11px ui-monospace, monospace; }
+.tail-table-heading { display: flex; justify-content: space-between; padding: 0 24px 16px; }
+.tail-table { min-width: 980px; }
+.research-notes { padding: 22px 24px; border-top: 1px solid var(--line); }
+.source-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.source-grid a { padding: 14px; border: 1px solid var(--line); border-radius: 11px; color: inherit; text-decoration: none; background: rgba(255,255,255,.018); }
+.source-grid a:hover { border-color: rgba(200,255,77,.35); }
+.source-grid strong, .source-grid span { display: block; }
+.source-grid strong { margin-bottom: 5px; color: var(--text); font-size: 11px; }
+.source-grid span { color: var(--muted); font-size: 10px; line-height: 1.55; }
+.method-warning { margin: 0 24px 22px; padding: 12px 14px; border-left: 2px solid #ffcb52; background: rgba(255,203,82,.04); }
+.method-warning strong { color: #ffcb52; }
 
 .export-row { display: flex; gap: 8px; }
 .export-row a {
@@ -280,6 +318,7 @@ footer p { margin: 0; }
   .filter-grid { grid-template-columns: repeat(3, 1fr); }
   .advanced-grid { grid-template-columns: repeat(3, 1fr); }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .tail-summary-grid, .source-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 680px) {
@@ -289,6 +328,11 @@ footer p { margin: 0; }
   .status-wrap { width: 100%; }
   .filter-grid { grid-template-columns: 1fr 1fr; }
   .advanced-grid { grid-template-columns: 1fr; }
+  .strategy-intro { grid-template-columns: 1fr; padding: 18px 16px; }
+  .tail-summary-grid { padding: 0 16px 18px; }
+  .analysis-walkthrough { margin: 0 16px 18px; }
+  .research-notes { padding: 18px 16px; }
+  .method-warning { margin: 0 16px 18px; }
   .form-action { grid-column: 1 / -1; }
   .stats-grid { gap: 8px; }
   .stat-card { min-height: 110px; padding: 16px; }
@@ -297,5 +341,5 @@ footer p { margin: 0; }
 }
 
 @media (max-width: 430px) {
-  .filter-grid, .stats-grid { grid-template-columns: 1fr; }
+  .filter-grid, .stats-grid, .tail-summary-grid, .source-grid { grid-template-columns: 1fr; }
 }
