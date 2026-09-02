@@ -17,10 +17,18 @@ class PolymarketClient:
     DATA_API = "https://data-api.polymarket.com"
     CLOB_API = "https://clob.polymarket.com"
 
-    def __init__(self, timeout_seconds: int = 15, max_retries: int = 3) -> None:
+    def __init__(
+        self,
+        timeout_seconds: int = 15,
+        max_retries: int = 3,
+        min_request_interval: float = 0.1,
+    ) -> None:
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
+        self.min_request_interval = max(0.0, float(min_request_interval))
         self._local = threading.local()
+        self._rate_lock = threading.Lock()
+        self._next_request_at = 0.0
 
     def leaderboard(
         self,
@@ -53,28 +61,54 @@ class PolymarketClient:
                 deduplicated[address] = row
         return list(deduplicated.values())[:limit]
 
+    def leaderboard_user(
+        self,
+        time_period: str,
+        order_by: str,
+        address: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the official rank for one address, including far outside top 1,000."""
+        data = self._get(
+            self.DATA_API + "/v1/leaderboard",
+            {
+                "category": "CRYPTO",
+                "timePeriod": time_period,
+                "orderBy": order_by,
+                "user": address,
+                "limit": 1,
+                "offset": 0,
+            },
+        )
+        if not isinstance(data, list):
+            raise PolymarketApiError("leaderboard user response was not a list")
+        return data[0] if data else None
+
     def recent_activity(
         self,
         address: str,
         cutoff_timestamp: int,
         page_size: int,
         max_pages: int,
+        end_timestamp: Optional[int] = None,
     ) -> Tuple[List[Dict[str, Any]], bool]:
         rows: List[Dict[str, Any]] = []
         truncated = False
         for page in range(max_pages):
             offset = page * page_size
+            params: Dict[str, Any] = {
+                "user": address,
+                "type": "TRADE",
+                "start": cutoff_timestamp,
+                "sortBy": "TIMESTAMP",
+                "sortDirection": "DESC",
+                "limit": page_size,
+                "offset": offset,
+            }
+            if end_timestamp is not None:
+                params["end"] = max(0, int(end_timestamp))
             data = self._get(
                 self.DATA_API + "/activity",
-                {
-                    "user": address,
-                    "type": "TRADE",
-                    "start": cutoff_timestamp,
-                    "sortBy": "TIMESTAMP",
-                    "sortDirection": "DESC",
-                    "limit": page_size,
-                    "offset": offset,
-                },
+                params,
             )
             if not isinstance(data, list):
                 raise PolymarketApiError("activity response was not a list")
@@ -158,6 +192,7 @@ class PolymarketClient:
         last_error: Optional[BaseException] = None
         for attempt in range(self.max_retries):
             try:
+                self._wait_for_request_slot()
                 response = self._session().get(
                     url,
                     params=params,
@@ -175,5 +210,26 @@ class PolymarketClient:
             except (requests.RequestException, ValueError) as exc:
                 last_error = exc
                 if attempt + 1 < self.max_retries:
-                    time.sleep(0.5 * (2 ** attempt))
+                    retry_after = None
+                    response = getattr(exc, "response", None)
+                    if response is not None:
+                        retry_after = response.headers.get("Retry-After")
+                    try:
+                        delay = float(retry_after) if retry_after is not None else None
+                    except (TypeError, ValueError):
+                        delay = None
+                    if delay is None:
+                        delay = 0.5 * (2 ** attempt)
+                    time.sleep(max(0.0, min(delay, 60.0)))
         raise PolymarketApiError("request failed for %s: %s" % (url, last_error))
+
+    def _wait_for_request_slot(self) -> None:
+        if self.min_request_interval <= 0:
+            return
+        with self._rate_lock:
+            now = time.monotonic()
+            delay = self._next_request_at - now
+            if delay > 0:
+                time.sleep(delay)
+                now = time.monotonic()
+            self._next_request_at = now + self.min_request_interval

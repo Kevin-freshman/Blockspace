@@ -29,6 +29,19 @@ from filter_engine import (
 )
 from polymarket_client import PolymarketClient
 from polygon_client import PolygonRpcClient
+from research_engine import (
+    ALLOWED_TOP_K,
+    analyze_leaderboard_transition,
+    build_hypothesis_ledger,
+    build_research_snapshot,
+    build_strategy_fingerprint,
+    choose_research_cohorts,
+    compare_enriched_cohorts,
+    normalize_leaderboard_rows,
+    research_slot_epoch,
+    research_slot_id,
+)
+from research_store import ResearchStore
 
 
 def validate_scan_config(payload: Dict[str, Any], base: Dict[str, Any]) -> Dict[str, Any]:
@@ -144,6 +157,7 @@ class FilterService:
         client: Optional[PolymarketClient] = None,
         chain_client: Optional[PolygonRpcClient] = None,
         clock: Callable[[], float] = time.time,
+        start_background: bool = True,
     ) -> None:
         self.base_dir = base_dir
         self.data_dir = base_dir / "data"
@@ -162,6 +176,20 @@ class FilterService:
         self.receipt_cache: Dict[str, Dict[str, Any]] = self._load_json(
             self.data_dir / "receipt_cache.json", {}
         )
+        self.research_config = copy.deepcopy(config.get("research") or {})
+        self.research_store = ResearchStore(
+            self.data_dir,
+            int(self.research_config.get("retention_days", 90)),
+        )
+        self.research_state: Dict[str, Any] = {
+            "status": "collecting" if self.research_config.get("enabled") else "disabled",
+            "active": False,
+            "last_capture_at": None,
+            "last_slot_at": None,
+            "next_retry_epoch": None,
+            "errors": [],
+        }
+        self._research_capture_lock = threading.Lock()
         self.state: Dict[str, Any] = {
             "status": "idle",
             "scan_id": None,
@@ -182,11 +210,21 @@ class FilterService:
         self._live_thread = threading.Thread(
             target=self._live_loop, name="polymarket-live-poll", daemon=True
         )
-        self._live_thread.start()
+        self._research_thread = threading.Thread(
+            target=self._research_loop,
+            name="polymarket-leaderboard-research",
+            daemon=True,
+        )
+        if start_background:
+            self._live_thread.start()
+            self._research_thread.start()
 
     def shutdown(self) -> None:
         self.stop_event.set()
-        self._live_thread.join(timeout=3)
+        if self._live_thread.is_alive():
+            self._live_thread.join(timeout=3)
+        if self._research_thread.is_alive():
+            self._research_thread.join(timeout=3)
 
     def snapshot(self) -> Dict[str, Any]:
         with self.lock:
@@ -198,11 +236,119 @@ class FilterService:
         snapshot["live_trades"] = snapshot["live_trades"][:live_limit]
         return snapshot
 
+    def public_research_summary(self, top_k: int = 100) -> Dict[str, Any]:
+        if top_k not in ALLOWED_TOP_K:
+            raise ValueError("top_k must be 100, 500, or 1000")
+        config = self.research_config
+        with self.lock:
+            runtime = copy.deepcopy(self.research_state)
+        snapshots = self.research_store.load_latest(1)
+        oldest = self.research_store.load_oldest()
+        snapshot_count = self.research_store.count()
+        collection = {
+            "enabled": bool(config.get("enabled")),
+            "category": "CRYPTO",
+            "time_period": str(config.get("time_period", "DAY")).upper(),
+            "cadence_hours": int(config.get("cadence_hours", 6)),
+            "comparison_hours": int(config.get("comparison_hours", 24)),
+            "snapshot_count": snapshot_count,
+            "oldest_slot_at": oldest.get("slot_at") if oldest else None,
+            "latest_slot_at": snapshots[0].get("slot_at") if snapshots else None,
+            "last_capture_at": runtime.get("last_capture_at"),
+            "active": bool(runtime.get("active")),
+        }
+        base = {
+            "status": runtime.get("status", "collecting"),
+            "collection": collection,
+            "top_k": top_k,
+            "current": None,
+            "transition": None,
+            "latest_analysis": None,
+            "hypotheses": [],
+            "errors": runtime.get("errors") or [],
+        }
+        if not snapshots:
+            base["hypotheses"] = build_hypothesis_ledger(
+                [],
+                int(config.get("insight_min_days", 7)),
+                int(config.get("insight_min_unique_addresses", 30)),
+                float(config.get("insight_min_direction_consistency", 0.75)),
+            )
+            return base
+
+        current = snapshots[0]
+        pnl_rows = (current.get("boards") or {}).get("PNL") or []
+        volume_rows = (current.get("boards") or {}).get("VOL") or []
+        base["current"] = {
+            "slot_at": current.get("slot_at"),
+            "captured_at": current.get("captured_at"),
+            "pnl_candidate_count": len(pnl_rows),
+            "volume_candidate_count": len(volume_rows),
+            "volume_winner_count": sum(
+                1 for row in volume_rows if float(row.get("pnl") or 0) > 0
+            ),
+            "volume_loser_count": sum(
+                1 for row in volume_rows if float(row.get("pnl") or 0) < 0
+            ),
+        }
+        comparison_seconds = int(config.get("comparison_hours", 24)) * 3600
+        previous = self.research_store.load_epoch(
+            int(current["slot_epoch"]) - comparison_seconds
+        )
+        if previous and previous.get("complete") and current.get("complete"):
+            base["transition"] = analyze_leaderboard_transition(
+                previous, current, top_k
+            )
+            base["status"] = "ready"
+        else:
+            base["status"] = "collecting"
+
+        analysis_entries = self.research_store.load_latest_analyses(
+            int(config.get("retention_days", 90))
+        )
+        if analysis_entries:
+            latest = analysis_entries[0]
+            analysis = copy.deepcopy(latest["analysis"])
+            analysis["slot_at"] = latest.get("slot_at")
+            analysis["cohort_sizes"] = {
+                key: len(value)
+                for key, value in (analysis.get("cohorts") or {}).items()
+            }
+            base["latest_analysis"] = analysis
+        analyses = [item["analysis"] for item in reversed(analysis_entries)]
+        base["hypotheses"] = build_hypothesis_ledger(
+            analyses,
+            int(config.get("insight_min_days", 7)),
+            int(config.get("insight_min_unique_addresses", 30)),
+            float(config.get("insight_min_direction_consistency", 0.75)),
+        )
+        return base
+
+    def export_research_csv(self, top_k: int = 100) -> bytes:
+        summary = self.public_research_summary(top_k)
+        transition = summary.get("transition") or {}
+        fields = [
+            "state",
+            "address",
+            "user_name",
+            "previous_rank",
+            "current_rank",
+            "current_rank_exact",
+            "previous_pnl",
+            "current_pnl",
+            "previous_volume",
+            "current_volume",
+            "visible_reason",
+        ]
+        return _csv_bytes(transition.get("rows") or [], fields)
+
     def start_scan(self, payload: Dict[str, Any]) -> Tuple[bool, str]:
         runtime_config = validate_scan_config(payload, self.base_config)
         with self.lock:
             if self.state["status"] == "scanning":
                 return False, "a scan is already running"
+            if self.research_state.get("active"):
+                return False, "a bounded research capture is running; retry shortly"
             scan_id = uuid.uuid4().hex[:12]
             self.state.update(
                 {
@@ -297,6 +443,253 @@ class FilterService:
             "onchain_polymarket_contract",
         ]
         return _csv_bytes(snapshot["live_trades"], fields)
+
+    def _research_loop(self) -> None:
+        while not self.stop_event.is_set():
+            config = self.research_config
+            if not config.get("enabled"):
+                if self.stop_event.wait(30.0):
+                    return
+                continue
+            slot_epoch = research_slot_epoch(
+                self.clock(), int(config.get("cadence_hours", 6))
+            )
+            with self.lock:
+                scan_in_progress = self.state.get("status") == "scanning"
+                next_retry_epoch = int(
+                    self.research_state.get("next_retry_epoch") or 0
+                )
+            retry_ready = int(self.clock()) >= next_retry_epoch
+            if (
+                retry_ready
+                and not scan_in_progress
+                and not self.research_store.exists(slot_epoch)
+            ):
+                try:
+                    self._capture_research_snapshot(slot_epoch)
+                except Exception as exc:
+                    self._append_research_error("capture", str(exc))
+            elif self.research_store.exists(slot_epoch):
+                latest = self.research_store.load_epoch(slot_epoch)
+                if latest:
+                    with self.lock:
+                        self.research_state.update(
+                            {
+                                "status": "ready",
+                                "last_capture_at": latest.get("captured_at"),
+                                "last_slot_at": latest.get("slot_at"),
+                            }
+                        )
+            if self.stop_event.wait(30.0):
+                return
+
+    def _capture_research_snapshot(self, slot_epoch: int) -> None:
+        if not self._research_capture_lock.acquire(False):
+            return
+        config = self.research_config
+        with self.lock:
+            if self.state.get("status") == "scanning":
+                self._research_capture_lock.release()
+                return
+            self.research_state["active"] = True
+            self.research_state["status"] = "capturing"
+        try:
+            period = str(config.get("time_period", "DAY")).upper()
+            limit = int(config.get("candidate_limit", 1000))
+            pnl_rows = self.client.leaderboard(period, "PNL", limit)
+            volume_rows = self.client.leaderboard(period, "VOL", limit)
+            if not pnl_rows or not volume_rows:
+                raise RuntimeError("official leaderboard returned an empty board")
+            captured_epoch = int(self.clock())
+            snapshot = build_research_snapshot(
+                slot_epoch,
+                captured_epoch,
+                period,
+                pnl_rows,
+                volume_rows,
+            )
+            previous = self.research_store.load_epoch(
+                slot_epoch - int(config.get("comparison_hours", 24)) * 3600
+            )
+            if previous and previous.get("complete"):
+                top_k = int(config.get("default_top_k", 100))
+                cohort_limit = int(config.get("cohort_limit", 30))
+                cohorts = choose_research_cohorts(
+                    previous, snapshot, top_k, cohort_limit
+                )
+                self._attach_research_rank_checks(
+                    snapshot, cohorts.get("dropped") or [], period
+                )
+                slot_hour = datetime.fromtimestamp(
+                    slot_epoch, tz=timezone.utc
+                ).hour
+                if (
+                    config.get("enrichment_enabled", True)
+                    and slot_hour == int(config.get("enrichment_hour_utc", 0))
+                ):
+                    self._attach_research_enrichment(
+                        snapshot, cohorts, slot_epoch
+                    )
+            self.research_store.save(snapshot)
+            with self.lock:
+                self.research_state.update(
+                    {
+                        "status": "ready",
+                        "last_capture_at": snapshot.get("captured_at"),
+                        "last_slot_at": snapshot.get("slot_at"),
+                        "next_retry_epoch": None,
+                    }
+                )
+        finally:
+            with self.lock:
+                self.research_state["active"] = False
+            self._research_capture_lock.release()
+
+    def _attach_research_rank_checks(
+        self,
+        snapshot: Dict[str, Any],
+        addresses: Iterable[str],
+        period: str,
+    ) -> None:
+        checks: Dict[str, Dict[str, Any]] = {}
+        for address in addresses:
+            try:
+                row = self.client.leaderboard_user(period, "PNL", address)
+                normalized = normalize_leaderboard_rows([row] if row else [])
+                if normalized:
+                    checks[address] = normalized[0]
+            except Exception as exc:
+                snapshot["errors"].append(
+                    {"scope": "rank:" + address, "message": str(exc)}
+                )
+        snapshot["rank_checks"] = checks
+
+    def _attach_research_enrichment(
+        self,
+        snapshot: Dict[str, Any],
+        cohorts: Dict[str, List[str]],
+        slot_epoch: int,
+    ) -> None:
+        config = self.research_config
+        addresses = list(
+            dict.fromkeys(
+                address
+                for values in cohorts.values()
+                for address in values
+            )
+        )
+        activities: Dict[str, Tuple[List[Dict[str, Any]], bool]] = {}
+        errors: List[Dict[str, str]] = []
+        workers = max(1, int(config.get("max_workers", 3)))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(
+                    self.client.recent_activity,
+                    address,
+                    slot_epoch - 86400,
+                    int(config.get("activity_page_size", 500)),
+                    int(config.get("max_activity_pages", 2)),
+                    slot_epoch,
+                ): address
+                for address in addresses
+            }
+            for future in as_completed(futures):
+                address = futures[future]
+                try:
+                    activities[address] = future.result()
+                except Exception as exc:
+                    activities[address] = ([], False)
+                    errors.append({"scope": "activity:" + address, "message": str(exc)})
+
+        fingerprints = {}
+        for address in addresses:
+            rows, truncated = activities.get(address, ([], False))
+            fingerprints[address] = build_strategy_fingerprint(
+                rows,
+                slot_epoch - 86400,
+                slot_epoch,
+                truncated,
+            )
+
+        if config.get("receipt_verification_enabled", True) and fingerprints:
+            try:
+                self.chain_client.verify_chain()
+                cap = max(1, int(config.get("receipts_per_address", 2)))
+                hashes_by_address = {
+                    address: (item.get("sample_transaction_hashes") or [])[:cap]
+                    for address, item in fingerprints.items()
+                }
+                all_hashes = [
+                    transaction_hash
+                    for values in hashes_by_address.values()
+                    for transaction_hash in values
+                ]
+                self._ensure_receipts(
+                    "research-" + research_slot_id(slot_epoch),
+                    all_hashes,
+                    self.base_config,
+                )
+                contracts = self.base_config["chain"]["polymarket_contracts"]
+                for address, hashes in hashes_by_address.items():
+                    fingerprints[address].update(
+                        summarize_chain_receipts(
+                            hashes,
+                            self.receipt_cache,
+                            contracts,
+                        )
+                    )
+            except Exception as exc:
+                errors.append({"scope": "research-chain", "message": str(exc)})
+
+        comparisons = compare_enriched_cohorts(cohorts, fingerprints)
+        snapshot["enrichment"] = {
+            "window_start_at": utc_iso(slot_epoch - 86400),
+            "window_end_at": utc_iso(slot_epoch),
+            "address_count": len(addresses),
+            "fingerprints": fingerprints,
+            "errors": errors[-100:],
+        }
+        successful_addresses = sum(
+            1 for address in addresses
+            if not any(
+                error["scope"] == "activity:" + address for error in errors
+            )
+        )
+        truncated_addresses = sum(
+            1 for item in fingerprints.values()
+            if item.get("activity_truncated")
+        )
+        requested_addresses = len(addresses)
+        eligible_for_insight = bool(
+            requested_addresses
+            and successful_addresses / requested_addresses >= 0.8
+            and truncated_addresses / requested_addresses <= 0.2
+        )
+        snapshot["analysis"] = {
+            "formal": True,
+            "eligible_for_insight": eligible_for_insight,
+            "cohorts": cohorts,
+            "comparisons": comparisons,
+            "data_quality": {
+                "requested_addresses": requested_addresses,
+                "successful_addresses": successful_addresses,
+                "truncated_addresses": truncated_addresses,
+                "receipt_verified_addresses": sum(
+                    1 for item in fingerprints.values()
+                    if item.get("chain_status") == "verified"
+                ),
+            },
+        }
+        snapshot["errors"].extend(errors[-100:])
+
+    def _append_research_error(self, scope: str, message: str) -> None:
+        with self.lock:
+            self.research_state["status"] = "error"
+            self.research_state["errors"].append(
+                {"scope": scope, "message": message, "at": utc_iso(self.clock())}
+            )
+            self.research_state["next_retry_epoch"] = int(self.clock()) + 300
+            self.research_state["errors"] = self.research_state["errors"][-20:]
 
     def _run_scan(self, scan_id: str, config: Dict[str, Any]) -> None:
         try:
@@ -763,7 +1156,10 @@ class FilterService:
     def _live_loop(self) -> None:
         while not self.stop_event.wait(1.0):
             with self.lock:
-                if self.state["status"] != "ready":
+                if (
+                    self.state["status"] != "ready"
+                    or self.research_state.get("active")
+                ):
                     continue
                 config = copy.deepcopy(self.state["config"])
                 scan_id = self.state["scan_id"]

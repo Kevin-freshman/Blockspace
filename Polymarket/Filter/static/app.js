@@ -11,8 +11,33 @@ const tradeRows = document.querySelector("#tradeRows");
 const errorPanel = document.querySelector("#errorPanel");
 const errorRows = document.querySelector("#errorRows");
 const tailRows = document.querySelector("#tailRows");
+const researchTopK = document.querySelector("#researchTopK");
+const researchExport = document.querySelector("#researchExport");
+const researchDropoutRows = document.querySelector("#researchDropoutRows");
+const researchComparisonRows = document.querySelector("#researchComparisonRows");
+const researchHypotheses = document.querySelector("#researchHypotheses");
 
 let latestState = null;
+let latestResearch = null;
+
+document.querySelectorAll(".view-tab").forEach((button) => {
+  button.addEventListener("click", () => {
+    const view = button.dataset.view;
+    document.querySelector("#filterView").hidden = view !== "filter";
+    document.querySelector("#researchView").hidden = view !== "research";
+    document.querySelectorAll(".view-tab").forEach((item) => {
+      const active = item === button;
+      item.classList.toggle("active", active);
+      item.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    if (view === "research") refreshResearch();
+  });
+});
+
+researchTopK.addEventListener("change", () => {
+  researchExport.href = `/api/export/research.csv?top_k=${encodeURIComponent(researchTopK.value)}`;
+  refreshResearch();
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -58,6 +83,152 @@ async function refreshState() {
     statusDot.className = "status-dot error";
     statusText.textContent = "连接中断";
   }
+}
+
+async function refreshResearch() {
+  try {
+    const topK = Number(researchTopK.value || 100);
+    const response = await fetch(`/api/research?top_k=${topK}`, { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "研究状态请求失败");
+    latestResearch = data;
+    renderResearch(data);
+  } catch (error) {
+    document.querySelector("#researchStatusBadge").textContent = "ERROR";
+    document.querySelector("#researchStatusText").textContent = error.message;
+  }
+}
+
+function renderResearch(data) {
+  const collection = data.collection || {};
+  const current = data.current || {};
+  const transition = data.transition;
+  document.querySelector("#researchSnapshotCount").textContent = formatInt(collection.snapshot_count || 0);
+  document.querySelector("#researchPnlCount").textContent = current.pnl_candidate_count == null ? "—" : formatInt(current.pnl_candidate_count);
+  document.querySelector("#researchLoserCount").textContent = current.volume_loser_count == null ? "—" : formatInt(current.volume_loser_count);
+  document.querySelector("#researchLatest").textContent = collection.latest_slot_at ? formatDateTimeSlot(collection.latest_slot_at) : "—";
+
+  const statusBadge = document.querySelector("#researchStatusBadge");
+  statusBadge.textContent = String(data.status || "collecting").toUpperCase();
+  statusBadge.className = `badge ${data.status === "ready" ? "buy" : ""}`;
+  const needed = Math.max(0, Math.ceil(Number(collection.comparison_hours || 24) / Number(collection.cadence_hours || 6)) + 1 - Number(collection.snapshot_count || 0));
+  document.querySelector("#researchStatusText").textContent = transition
+    ? `${transition.previous_slot_at || "—"} → ${transition.current_slot_at || "—"}，按官方 CRYPTO DAY PNL Top ${formatInt(transition.top_k)} 比较。`
+    : `正在积累 24 小时配对快照；至少还需要 ${formatInt(needed)} 个采样槽。服务重启不会伪造历史回填。`;
+
+  renderResearchTransition(transition);
+  renderResearchAnalysis(data.latest_analysis);
+  renderHypotheses(data.hypotheses || []);
+}
+
+function renderResearchTransition(transition) {
+  document.querySelector("#researchEntered").textContent = transition ? formatInt(transition.entered_count) : "—";
+  document.querySelector("#researchRetained").textContent = transition ? formatInt(transition.retained_count) : "—";
+  document.querySelector("#researchDropped").textContent = transition ? formatInt(transition.dropped_count) : "—";
+  document.querySelector("#researchRetention").textContent = transition?.retention_rate == null ? "—" : formatPercent(transition.retention_rate);
+  if (!transition) {
+    document.querySelector("#researchTransitionNote").textContent = "正在积累 24 小时配对快照。";
+    researchDropoutRows.innerHTML = '<tr><td colspan="7" class="empty">有完整 24 小时比较后显示掉榜地址。</td></tr>';
+    return;
+  }
+  const reasons = transition.reason_counts || {};
+  document.querySelector("#researchTransitionNote").textContent =
+    `可见解释：${formatInt(reasons.current_pnl_non_positive || 0)} 个当前 PNL 非正，${formatInt(reasons.official_window_pnl_lower || 0)} 个官方窗口 PNL 值下降，${formatInt(reasons.relative_rank_competition || 0)} 个更符合相对排名竞争；这些是分类证据，不是因果结论。`;
+  const dropped = (transition.rows || []).filter((row) => row.state === "dropped");
+  if (!dropped.length) {
+    researchDropoutRows.innerHTML = '<tr><td colspan="7" class="empty">当前比较没有掉出所选 Top K 的地址。</td></tr>';
+    return;
+  }
+  researchDropoutRows.innerHTML = dropped.slice(0, 50).map((row) => {
+    const address = safeAddress(row.address);
+    const rank = row.current_rank == null ? `&gt; ${formatInt(transition.top_k)}` : `#${formatInt(row.current_rank)}`;
+    return `<tr>
+      <td><a class="address-link" href="https://polymarket.com/profile/${address}" target="_blank" rel="noreferrer"><span class="cell-title">${escapeHtml(row.user_name || shortAddress(address))}</span><span class="cell-sub">${shortAddress(address)}</span></a></td>
+      <td><span class="metric">#${formatInt(row.previous_rank)}</span></td>
+      <td><span class="metric">${rank}</span></td>
+      <td><span class="metric ${Number(row.previous_pnl) >= 0 ? "positive" : "negative"}">${formatMoney(row.previous_pnl)}</span></td>
+      <td><span class="metric ${Number(row.current_pnl) >= 0 ? "positive" : "negative"}">${row.current_pnl == null ? "—" : formatMoney(row.current_pnl)}</span></td>
+      <td><span class="badge">${escapeHtml(researchReason(row.visible_reason))}</span></td>
+      <td><span class="cell-sub">${row.current_rank_exact ? "官方 user 排名" : "榜单边界/对照池"}</span></td>
+    </tr>`;
+  }).join("");
+}
+
+function renderResearchAnalysis(analysis) {
+  const note = document.querySelector("#researchAnalysisNote");
+  if (!analysis) {
+    note.textContent = "等待第一个 00:00 UTC 每日富集样本；不会把 6 小时重叠窗口当作独立样本。";
+    researchComparisonRows.innerHTML = '<tr><td colspan="6" class="empty">积累数据后显示参数指纹。</td></tr>';
+    return;
+  }
+  const quality = analysis.data_quality || {};
+  note.textContent = `${analysis.slot_at || "—"}：请求 ${formatInt(quality.requested_addresses || 0)} 个地址，成功 ${formatInt(quality.successful_addresses || 0)}，截断 ${formatInt(quality.truncated_addresses || 0)}，有界交易哈希回执全部确认 ${formatInt(quality.receipt_verified_addresses || 0)}。${analysis.eligible_for_insight ? "数据质量可进入 Insight 累计。" : "该日数据质量不足，只展示、不进入 Insight 累计。"}这里展示的是公开行为指纹，不是机器人的私有参数。`;
+  const rows = (analysis.comparisons || []).flatMap((comparison) =>
+    (comparison.metrics || []).map((metric) => ({ comparison, metric }))
+  );
+  if (!rows.length) {
+    researchComparisonRows.innerHTML = '<tr><td colspan="6" class="empty">该样本没有足够的可比参数。</td></tr>';
+    return;
+  }
+  researchComparisonRows.innerHTML = rows.map(({ comparison, metric }) => `<tr>
+    <td><span class="cell-title">${escapeHtml(comparison.label || comparison.id)}</span><span class="cell-sub">第一组 − 第二组</span></td>
+    <td>${escapeHtml(metric.label || metric.field)}</td>
+    <td><span class="metric">${formatResearchMetric(metric.field, metric.first_median)}</span></td>
+    <td><span class="metric">${formatResearchMetric(metric.field, metric.second_median)}</span></td>
+    <td><span class="metric ${Number(metric.difference) >= 0 ? "positive" : "negative"}">${metric.difference == null ? "—" : formatResearchMetric(metric.field, metric.difference)}</span></td>
+    <td><span class="cell-sub">${formatInt(metric.first_count)} / ${formatInt(metric.second_count)}</span></td>
+  </tr>`).join("");
+}
+
+function renderHypotheses(rows) {
+  if (!rows.length) {
+    researchHypotheses.innerHTML = '<article><span class="badge">COLLECTING</span><h3>正在建立研究基线</h3></article>';
+    return;
+  }
+  const statusLabels = {
+    collecting: "COLLECTING",
+    finding: "FINDING",
+    insight: "INSIGHT",
+    counter_signal: "反直觉信号",
+    inconclusive: "证据不一致",
+    not_testable_v1: "隐藏变量",
+  };
+  researchHypotheses.innerHTML = rows.map((row) => {
+    const classes = row.status === "insight" ? "insight" : row.status === "counter_signal" ? "counter-signal" : "";
+    const interval = row.bootstrap_95_low == null ? "区间待积累" : `bootstrap 95% [${formatNumber(row.bootstrap_95_low, 4)}, ${formatNumber(row.bootstrap_95_high, 4)}]`;
+    const evidence = row.status === "not_testable_v1"
+      ? "第一版明确不检验"
+      : `${formatInt(row.days || 0)}/${formatInt(row.minimum_days || 7)} 日 · 唯一地址 ${formatInt(row.first_unique_addresses || 0)}/${formatInt(row.second_unique_addresses || 0)} · 方向一致 ${formatPercent(row.direction_consistency || 0)} · ${interval}`;
+    return `<article class="${classes}">
+      <span class="badge ${row.status === "insight" ? "buy" : ""}">${escapeHtml(statusLabels[row.status] || row.status)}</span>
+      <h3>${escapeHtml(row.title || row.id)}</h3>
+      <p>${escapeHtml(row.statement || "")}</p>
+      <small>${escapeHtml(evidence)}</small>
+    </article>`;
+  }).join("");
+}
+
+function researchReason(value) {
+  return ({
+    current_pnl_non_positive: "当前 PNL 非正",
+    official_window_pnl_lower: "官方窗口 PNL 值下降",
+    relative_rank_competition: "相对排名竞争",
+    current_metric_unknown: "当前指标未知",
+  })[value] || "待解释";
+}
+
+function formatResearchMetric(field, value) {
+  if (value == null) return "—";
+  if (["market_concentration", "buy_share", "high_price_buy_share", "tail_60m_share"].includes(field)) return formatPercent(value);
+  if (["median_trade_usdc"].includes(field)) return formatMoney(value);
+  return formatNumber(value, 3);
+}
+
+function formatDateTimeSlot(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return `${date.toISOString().slice(5, 10)} ${date.toISOString().slice(11, 16)}`;
 }
 
 function render(state) {
@@ -237,4 +408,6 @@ function escapeHtml(value) {
 }
 
 refreshState();
+refreshResearch();
 setInterval(refreshState, 5000);
+setInterval(refreshResearch, 60000);

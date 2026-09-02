@@ -47,6 +47,27 @@
     "max_events": 1000,
     "max_tracked_addresses": 100
   },
+  "research": {
+    "enabled": true,
+    "category": "CRYPTO",
+    "time_period": "DAY",
+    "cadence_hours": 6,
+    "comparison_hours": 24,
+    "candidate_limit": 1000,
+    "default_top_k": 100,
+    "retention_days": 90,
+    "enrichment_enabled": true,
+    "enrichment_hour_utc": 0,
+    "cohort_limit": 30,
+    "activity_page_size": 500,
+    "max_activity_pages": 2,
+    "max_workers": 3,
+    "receipt_verification_enabled": true,
+    "receipts_per_address": 2,
+    "insight_min_days": 7,
+    "insight_min_unique_addresses": 30,
+    "insight_min_direction_consistency": 0.75
+  },
   "http": {
     "host": "127.0.0.1",
     "port": 8788

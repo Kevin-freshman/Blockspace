@@ -26,6 +26,12 @@
       </div>
     </header>
 
+    <nav class="view-nav" aria-label="页面视图">
+      <button type="button" class="view-tab active" data-view="filter" aria-selected="true">地址筛选</button>
+      <button type="button" class="view-tab" data-view="research" aria-selected="false">排行榜研究</button>
+    </nav>
+
+    <div id="filterView" class="view-stack">
     <section class="panel filter-panel">
       <div class="section-heading">
         <div>
@@ -271,6 +277,99 @@
       </div>
       <ul id="errorRows"></ul>
     </section>
+    </div>
+
+    <div id="researchView" class="view-stack" hidden>
+      <section class="panel research-hero">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">LONGITUDINAL · CRYPTO DAY</p>
+            <h2>官方排行榜纵向研究</h2>
+          </div>
+          <div class="research-controls">
+            <label>
+              <span>排行榜边界</span>
+              <select id="researchTopK">
+                <option value="100" selected>Top 100</option>
+                <option value="500">Top 500</option>
+                <option value="1000">Top 1,000</option>
+              </select>
+            </label>
+            <a id="researchExport" href="/api/export/research.csv?top_k=100">迁移 CSV</a>
+          </div>
+        </div>
+        <div class="research-status-line">
+          <span id="researchStatusBadge" class="badge">COLLECTING</span>
+          <p id="researchStatusText">等待首个官方排行榜快照。相隔 24 小时后才能判定进入、留榜与掉榜。</p>
+        </div>
+        <p class="method-warning"><strong>口径：</strong>每 6 小时保存一次 CRYPTO DAY 的官方 PNL Top 1,000 与 VOL Top 1,000；正式比较只使用相隔 24 小时的完整快照。官方 DAY PNL 是榜单窗口值，前后差额不被解释成这 24 小时的新增利润。</p>
+      </section>
+
+      <section class="stats-grid research-stats" aria-label="排行榜研究摘要">
+        <article class="stat-card"><span>完整快照</span><strong id="researchSnapshotCount">—</strong><small>每 6 小时一次</small></article>
+        <article class="stat-card"><span>PNL 榜候选</span><strong id="researchPnlCount">—</strong><small>官方 CRYPTO DAY</small></article>
+        <article class="stat-card"><span>VOL 榜负 PNL</span><strong id="researchLoserCount">—</strong><small>高成交量输家对照池</small></article>
+        <article class="stat-card accent"><span>最新采样</span><strong id="researchLatest">—</strong><small>UTC slot</small></article>
+      </section>
+
+      <section class="panel research-panel">
+        <div class="section-heading compact">
+          <div>
+            <p class="section-kicker">01 · MEMBERSHIP TRANSITION</p>
+            <h2>今天在榜，24 小时后去了哪里</h2>
+          </div>
+          <p>“掉榜”只表示离开所选 Top K；系统会对重点掉榜地址调用官方 user 排名复核，不把接口缺失当作亏损。</p>
+        </div>
+        <div class="transition-grid">
+          <article><span>进入</span><strong id="researchEntered">—</strong><small>t0 榜外 → t1 榜内</small></article>
+          <article><span>留榜</span><strong id="researchRetained">—</strong><small>t0 / t1 均在榜</small></article>
+          <article><span>掉榜</span><strong id="researchDropped">—</strong><small>t0 榜内 → t1 榜外</small></article>
+          <article><span>留存率</span><strong id="researchRetention">—</strong><small>留榜 ÷ t0 榜内</small></article>
+        </div>
+        <p id="researchTransitionNote" class="metric-note">正在积累 24 小时配对快照。</p>
+        <div class="table-wrap">
+          <table class="research-table">
+            <thead><tr><th>地址</th><th>昨日排名</th><th>当前排名</th><th>昨日 PNL</th><th>当前 PNL</th><th>可见解释</th><th>复核</th></tr></thead>
+            <tbody id="researchDropoutRows"><tr><td colspan="7" class="empty">有完整 24 小时比较后显示掉榜地址。</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel research-panel">
+        <div class="section-heading compact">
+          <div>
+            <p class="section-kicker">02 · STRATEGY FINGERPRINT</p>
+            <h2>亏钱与赚钱地址的可见参数差距</h2>
+          </div>
+          <p>每天 00:00 UTC 对掉榜、留榜、高成交量赢家与输家各最多 30 个地址做成交量匹配和 24 小时活动富集。</p>
+        </div>
+        <p id="researchAnalysisNote" class="metric-note">等待第一个每日富集样本。</p>
+        <div class="table-wrap">
+          <table class="research-table parameter-table">
+            <thead><tr><th>对照</th><th>参数</th><th>第一组中位数</th><th>第二组中位数</th><th>差值</th><th>样本</th></tr></thead>
+            <tbody id="researchComparisonRows"><tr><td colspan="6" class="empty">积累数据后显示参数指纹。</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel research-panel">
+        <div class="section-heading compact">
+          <div>
+            <p class="section-kicker">03 · FINDING → INSIGHT</p>
+            <h2>假设、反直觉信号与证据门槛</h2>
+          </div>
+          <p>至少 7 个完整日样本、每组 30 个唯一地址、方向一致且 bootstrap 区间不跨 0，才升级为 Insight。</p>
+        </div>
+        <div id="researchHypotheses" class="hypothesis-grid">
+          <article><span class="badge">COLLECTING</span><h3>正在建立研究基线</h3><p>首个 Finding 需要一次每日 cohort 富集。</p></article>
+        </div>
+        <div class="research-boundaries">
+          <div><strong>已观察</strong><p>官方排名与 PNL、成交量、公开活动、成交哈希、价格、方向、规模与短周期结束时间。</p></div>
+          <div><strong>代理变量</strong><p>交易频率、每哈希 fill 数、市场集中度、高价 BUY、尾盘占比与有界 Polygon 回执确认。</p></div>
+          <div><strong>第一版不可观察</strong><p>挂单创建/撤单时间、真实撮合延迟、完整库存路径和 maker/taker 对手方；不据此判断“对敲”。</p></div>
+        </div>
+      </section>
+    </div>
 
     <footer>
       <p>公开只读数据 · 不连接钱包 · 不执行交易</p>

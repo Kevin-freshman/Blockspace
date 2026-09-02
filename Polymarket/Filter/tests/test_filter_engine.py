@@ -383,6 +383,46 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(len(client.calls), 20)
         self.assertEqual(client.calls[-1]["offset"], 950)
 
+    def test_leaderboard_user_can_return_rank_outside_candidate_pool(self):
+        class FakeClient(PolymarketClient):
+            def __init__(self):
+                self.params = None
+
+            def _get(self, _url, params):
+                self.params = dict(params)
+                return [
+                    {
+                        "rank": "485080",
+                        "proxyWallet": ADDRESS,
+                        "pnl": -10,
+                        "vol": 100,
+                    }
+                ]
+
+        client = FakeClient()
+        row = client.leaderboard_user("DAY", "PNL", ADDRESS)
+        self.assertEqual(row["rank"], "485080")
+        self.assertEqual(client.params["user"], ADDRESS)
+        self.assertEqual(client.params["category"], "CRYPTO")
+
+    def test_research_activity_has_bounded_end_time(self):
+        class FakeClient(PolymarketClient):
+            def __init__(self):
+                self.params = None
+
+            def _get(self, _url, params):
+                self.params = dict(params)
+                return []
+
+        client = FakeClient()
+        rows, truncated = client.recent_activity(
+            ADDRESS, 100, 500, 2, end_timestamp=200
+        )
+        self.assertEqual(rows, [])
+        self.assertFalse(truncated)
+        self.assertEqual(client.params["start"], 100)
+        self.assertEqual(client.params["end"], 200)
+
     def test_polygon_receipt_normalization(self):
         transaction_hash = "0x" + "1" * 64
         receipt = normalize_receipt(

@@ -10,7 +10,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from service import FilterService
 
@@ -29,7 +29,9 @@ class FilterHandler(BaseHTTPRequestHandler):
     server_version = "PolymarketFilter/1.0"
 
     def do_GET(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
         if path == "/api/health":
             snapshot = self.service.snapshot()
             self._json(
@@ -45,11 +47,22 @@ class FilterHandler(BaseHTTPRequestHandler):
                         if item.get("chain_status") == "verified"
                     ),
                     "live_events": len(snapshot["live_trades"]),
+                    "research": {
+                        "status": self.service.research_state.get("status"),
+                        "last_slot_at": self.service.research_state.get("last_slot_at"),
+                    },
                 },
             )
             return
         if path == "/api/state":
             self._json(200, self.service.public_snapshot())
+            return
+        if path == "/api/research":
+            try:
+                top_k = int((query.get("top_k") or ["100"])[0])
+                self._json(200, self.service.public_research_summary(top_k))
+            except ValueError as exc:
+                self._json(400, {"error": str(exc)})
             return
         if path == "/api/export/addresses.csv":
             self._download(
@@ -64,6 +77,17 @@ class FilterHandler(BaseHTTPRequestHandler):
                 "text/csv; charset=utf-8",
                 "polymarket-filter-live-trades.csv",
             )
+            return
+        if path == "/api/export/research.csv":
+            try:
+                top_k = int((query.get("top_k") or ["100"])[0])
+                self._download(
+                    self.service.export_research_csv(top_k),
+                    "text/csv; charset=utf-8",
+                    "polymarket-leaderboard-research.csv",
+                )
+            except ValueError as exc:
+                self._json(400, {"error": str(exc)})
             return
         if path == "/api/export/snapshot.json":
             payload = json.dumps(
