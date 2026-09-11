@@ -172,6 +172,24 @@ POLITICS 跨品类资金假设和 maker/taker 对手方/疑似对敲研究也不
 - [Angelini & De Angelis (2026), real-time information processing，预印本](https://arxiv.org/abs/2606.07811)
 - [Xi et al. (2026), prediction-market volatility near resolution，预印本](https://arxiv.org/abs/2607.08199)
 
+## 半年 walk-forward 回测
+
+固定的 2026-03-10 至 2026-09-10 BTC / ETH / SOL 小时级 Up-or-Down 回测见
+[`docs/SIX_MONTH_BACKTEST.md`](docs/SIX_MONTH_BACKTEST.md)。它用前四个月选参、后两个月
+样本外验证，并同时报告当前公开 Crypto taker fee、0.5¢/1¢ 不利滑点、日级 block
+bootstrap 与同小时风险预算。当前结论是 **no-trade**：训练期最优的高概率尾盘规则没有
+通过样本外验证，2 分钟超尾盘规则在训练和样本外压力测试中均显著为负。
+
+运行时市场与价格缓存只写入被忽略的 `data/backtest/`。已有完整缓存后可离线复现：
+
+```bash
+python3 scripts/run_six_month_backtest.py \
+  --start 2026-03-10 --end 2026-09-10 --split 2026-07-10 --offline
+```
+
+去掉 `--offline` 才会显式调用有界的 Gamma keyset events 与 CLOB batch price history
+公共只读接口。历史价格不是当时可成交 ask，因此报告不能替代 paper trading。
+
 ## 指标口径
 
 - **成交记录数**：回看窗口内 `/activity?type=TRADE` 返回的记录数。一次链上交易可能对应多条 fill，所以页面也显示去重后的交易哈希数。
